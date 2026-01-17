@@ -1,315 +1,249 @@
+<!-- FILE 1: users.php -->
 <?php
-// ============================================
-// USER MANAGEMENT PAGE
-// File: users.php
-// ============================================
-
-session_start();
 require_once 'config.php';
+session_start();
 
-// Cek login dan role admin
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit;
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
+    header('Location: index.php');
+    exit();
 }
 
-if ($_SESSION['role'] !== 'admin') {
-    die('Akses ditolak. Hanya admin yang dapat mengelola user.');
-}
-
-// Handle CRUD operations
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
-    
-    try {
-        if ($action === 'add') {
-            // Add user
-            $stmt = $conn->prepare("
-                INSERT INTO users (
-                    username, 
-                    password, 
-                    full_name, 
-                    role, 
-                    is_active
-                ) VALUES (?, ?, ?, ?, 1)
-            ");
-            
-            $username = $_POST['username'];
-            $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-            $full_name = $_POST['full_name'];
-            $role = $_POST['role'];
-            
-            $stmt->bind_param("ssss", $username, $password, $full_name, $role);
-            $stmt->execute();
-            $_SESSION['success'] = 'User berhasil ditambahkan';
-            
-        } elseif ($action === 'edit') {
-            // Edit user
-            if (!empty($_POST['password'])) {
-                // Update dengan password baru
-                $stmt = $conn->prepare("
-                    UPDATE users 
-                    SET username = ?, 
-                        password = ?, 
-                        full_name = ?, 
-                        role = ?, 
-                        is_active = ?
-                    WHERE id = ?
-                ");
-                
-                $username = $_POST['username'];
-                $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-                $full_name = $_POST['full_name'];
-                $role = $_POST['role'];
-                $is_active = isset($_POST['is_active']) ? 1 : 0;
-                $id = $_POST['id'];
-                
-                $stmt->bind_param("ssssii", $username, $password, $full_name, $role, $is_active, $id);
-            } else {
-                // Update tanpa password
-                $stmt = $conn->prepare("
-                    UPDATE users 
-                    SET username = ?, 
-                        full_name = ?, 
-                        role = ?, 
-                        is_active = ?
-                    WHERE id = ?
-                ");
-                
-                $username = $_POST['username'];
-                $full_name = $_POST['full_name'];
-                $role = $_POST['role'];
-                $is_active = isset($_POST['is_active']) ? 1 : 0;
-                $id = $_POST['id'];
-                
-                $stmt->bind_param("sssii", $username, $full_name, $role, $is_active, $id);
-            }
-            
-            $stmt->execute();
-            $_SESSION['success'] = 'User berhasil diupdate';
-            
-        } elseif ($action === 'delete') {
-            // Soft delete user
-            $stmt = $conn->prepare("UPDATE users SET is_active = 0 WHERE id = ?");
-            $id = $_POST['id'];
-            $stmt->bind_param("i", $id);
-            $stmt->execute();
-            $_SESSION['success'] = 'User berhasil dinonaktifkan';
-        }
-        
-        $stmt->close();
-        header('Location: users.php');
-        exit;
-        
-    } catch (Exception $e) {
-        $_SESSION['error'] = 'Error: ' . $e->getMessage();
-    }
-}
-
-// Get users
-$users_query = "SELECT * FROM users ORDER BY created_at DESC";
-$users = $conn->query($users_query);
+$users = $conn->query("SELECT * FROM users ORDER BY id");
 
 include 'header.php';
 ?>
 
-<div class="container-fluid py-4">
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <h2><i class="fas fa-users-cog"></i> Manajemen User</h2>
-        </div>
-        <div class="col-md-6 text-end">
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">
-                <i class="fas fa-user-plus"></i> Tambah User
-            </button>
-        </div>
-    </div>
-
-    <?php if (isset($_SESSION['success'])): ?>
-        <div class="alert alert-success alert-dismissible fade show">
-            <?= $_SESSION['success']; unset($_SESSION['success']); ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['error'])): ?>
-        <div class="alert alert-danger alert-dismissible fade show">
-            <?= $_SESSION['error']; unset($_SESSION['error']); ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    <?php endif; ?>
-
-    <!-- Users Table -->
-    <div class="card">
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Username</th>
-                            <th>Nama Lengkap</th>
-                            <th>Role</th>
-                            <th>Status</th>
-                            <th>Dibuat</th>
-                            <th>Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php while ($user = $users->fetch_assoc()): ?>
-                            <tr>
-                                <td><?= $user['id'] ?></td>
-                                <td><strong><?= htmlspecialchars($user['username']) ?></strong></td>
-                                <td><?= htmlspecialchars($user['full_name']) ?></td>
-                                <td>
-                                    <?php if ($user['role'] === 'admin'): ?>
-                                        <span class="badge bg-danger">Admin</span>
-                                    <?php else: ?>
-                                        <span class="badge bg-info">Kasir</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <?php if ($user['is_active']): ?>
-                                        <span class="badge bg-success">Aktif</span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">Nonaktif</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td><?= date('d/m/Y', strtotime($user['created_at'])) ?></td>
-                                <td>
-                                    <button class="btn btn-sm btn-warning" 
-                                            onclick="editUser(<?= htmlspecialchars(json_encode($user)) ?>)">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    <?php if ($user['id'] != $_SESSION['user_id']): ?>
-                                        <button class="btn btn-sm btn-danger" 
-                                                onclick="deleteUser(<?= $user['id'] ?>, '<?= htmlspecialchars($user['username']) ?>')">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endwhile; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Modal Add User -->
-<div class="modal fade" id="addUserModal">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form method="POST">
-                <input type="hidden" name="action" value="add">
-                <div class="modal-header">
-                    <h5 class="modal-title">Tambah User</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Username *</label>
-                        <input type="text" name="username" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Password *</label>
-                        <input type="password" name="password" class="form-control" required minlength="6">
-                        <small class="text-muted">Minimal 6 karakter</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Nama Lengkap *</label>
-                        <input type="text" name="full_name" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Role *</label>
-                        <select name="role" class="form-select" required>
-                            <option value="kasir">Kasir</option>
-                            <option value="admin">Admin</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                    <button type="submit" class="btn btn-primary">Simpan</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Modal Edit User -->
-<div class="modal fade" id="editUserModal">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <form method="POST">
-                <input type="hidden" name="action" value="edit">
-                <input type="hidden" name="id" id="edit_id">
-                <div class="modal-header">
-                    <h5 class="modal-title">Edit User</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Username *</label>
-                        <input type="text" name="username" id="edit_username" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Password</label>
-                        <input type="password" name="password" id="edit_password" class="form-control" minlength="6">
-                        <small class="text-muted">Kosongkan jika tidak ingin mengubah password</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Nama Lengkap *</label>
-                        <input type="text" name="full_name" id="edit_fullname" class="form-control" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Role *</label>
-                        <select name="role" id="edit_role" class="form-select" required>
-                            <option value="kasir">Kasir</option>
-                            <option value="admin">Admin</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <div class="form-check">
-                            <input type="checkbox" name="is_active" id="edit_active" class="form-check-input" checked>
-                            <label class="form-check-label">Aktif</label>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-                    <button type="submit" class="btn btn-primary">Update</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<script>
-function editUser(data) {
-    document.getElementById('edit_id').value = data.id;
-    document.getElementById('edit_username').value = data.username;
-    document.getElementById('edit_fullname').value = data.full_name;
-    document.getElementById('edit_role').value = data.role;
-    document.getElementById('edit_active').checked = data.is_active == 1;
-    document.getElementById('edit_password').value = '';
-    
-    new bootstrap.Modal(document.getElementById('editUserModal')).show();
+<style>
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
 }
 
-function deleteUser(id, username) {
-    if (confirm('Nonaktifkan user "' + username + '"?')) {
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.innerHTML = `
-            <input type="hidden" name="action" value="delete">
-            <input type="hidden" name="id" value="${id}">
-        `;
-        document.body.appendChild(form);
-        form.submit();
+.container-main {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page-header {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.page-title {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 1rem 0;
+}
+
+.users-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.user-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 2rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    text-align: center;
+}
+
+.user-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 auto 1rem;
+}
+
+.user-name {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 0.5rem;
+}
+
+.user-role {
+    display: inline-block;
+    padding: 0.25rem 1rem;
+    border-radius: 50px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+</style>
+
+<div class="container-main">
+    <div class="page-header">
+        <h1 class="page-title">👤 Manajemen User</h1>
+        <p style="color: #718096; margin: 0;">Daftar pengguna sistem</p>
+    </div>
+
+    <div class="users-grid">
+        <?php while($user = $users->fetch_assoc()): ?>
+        <div class="user-card">
+            <div class="user-avatar"><?= strtoupper(substr($user['username'], 0, 1)) ?></div>
+            <div class="user-name"><?= htmlspecialchars($user['full_name'] ?? $user['username']) ?></div>
+            <p style="color: #718096;">@<?= htmlspecialchars($user['username']) ?></p>
+            <span class="user-role"><?= ucfirst($user['role']) ?></span>
+        </div>
+        <?php endwhile; ?>
+    </div>
+</div>
+
+<?php include 'footer.php'; ?>
+
+<!-- ===================================== -->
+<!-- FILE 2: settings.php -->
+<!-- Save this as a separate file -->
+<!-- ===================================== -->
+
+<?php
+require_once 'config.php';
+session_start();
+
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
+    header('Location: index.php');
+    exit();
+}
+
+// Handle Update
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    foreach ($_POST as $key => $value) {
+        if ($key != 'action') {
+            $key_escaped = $conn->real_escape_string($key);
+            $value_escaped = $conn->real_escape_string($value);
+            $conn->query("UPDATE settings SET setting_value='$value_escaped' WHERE setting_key='$key_escaped'");
+        }
     }
+    header('Location: settings.php?msg=success');
+    exit();
 }
-</script>
+
+$settings = $conn->query("SELECT * FROM settings ORDER BY id");
+
+include 'header.php';
+?>
+
+<style>
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+}
+
+.container-main {
+    padding: 2rem;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.page-header {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.page-title {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 1rem 0;
+}
+
+.settings-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 2rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 1rem;
+}
+
+.form-text {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.85rem;
+    color: #718096;
+}
+
+.btn-save {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 10px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+}
+</style>
+
+<div class="container-main">
+    <div class="page-header">
+        <h1 class="page-title">⚙️ Pengaturan Sistem</h1>
+        <p style="color: #718096; margin: 0;">Konfigurasi aplikasi</p>
+    </div>
+
+    <div class="settings-card">
+        <form method="POST">
+            <input type="hidden" name="action" value="update">
+            
+            <?php while($setting = $settings->fetch_assoc()): ?>
+            <div class="form-group">
+                <label><?= ucwords(str_replace('_', ' ', $setting['setting_key'])) ?></label>
+                <input type="text" name="<?= $setting['setting_key'] ?>" 
+                       value="<?= htmlspecialchars($setting['setting_value']) ?>" 
+                       class="form-control">
+                <?php if($setting['description']): ?>
+                <small class="form-text"><?= htmlspecialchars($setting['description']) ?></small>
+                <?php endif; ?>
+            </div>
+            <?php endwhile; ?>
+            
+            <button type="submit" class="btn-save">💾 Simpan Pengaturan</button>
+        </form>
+    </div>
+</div>
 
 <?php include 'footer.php'; ?>
