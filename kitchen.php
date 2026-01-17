@@ -1,302 +1,408 @@
 <?php
-// ============================================
-// KITCHEN DISPLAY SYSTEM (FIXED)
-// File: kitchen.php
-// Error Fixed: Table 'transaction_details' → menggunakan 'transaction_items'
-// ============================================
-
-session_start();
 require_once 'config.php';
+session_start();
 
-// Cek login
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
-    exit;
+    exit();
 }
 
-// Get filter status
-$status_filter = $_GET['status'] ?? 'all';
-
-// Query orders (FIXED: menggunakan transaction_items, bukan transaction_details)
-$query = "
-    SELECT 
-        ti.id,
-        ti.transaction_id,
-        ti.product_name,
-        ti.quantity,
-        ti.kitchen_status,
-        ti.notes,
-        ti.created_at,
-        t.transaction_code,
-        t.transaction_date,
-        u.full_name as cashier_name
-    FROM transaction_items ti
-    JOIN transactions t ON ti.transaction_id = t.id
-    LEFT JOIN users u ON t.cashier_id = u.id
-    WHERE t.status = 'completed'
-";
-
-if ($status_filter !== 'all') {
-    $query .= " AND ti.kitchen_status = '" . $conn->real_escape_string($status_filter) . "'";
-}
-
-$query .= " ORDER BY ti.created_at ASC, ti.id ASC";
-
-$result = $conn->query($query);
+// Get kitchen orders
+$query = "SELECT 
+    ko.*,
+    p.name as product_name,
+    p.image,
+    t.invoice_number,
+    ti.notes
+    FROM kitchen_orders ko
+    JOIN transactions t ON ko.transaction_id = t.id
+    JOIN transaction_items ti ON ko.transaction_item_id = ti.id
+    JOIN products p ON ti.product_id = p.id
+    WHERE ko.status != 'served'
+    ORDER BY 
+        CASE ko.status
+            WHEN 'pending' THEN 1
+            WHEN 'preparing' THEN 2
+            WHEN 'ready' THEN 3
+        END,
+        ko.created_at ASC";
+$orders = $conn->query($query);
 
 include 'header.php';
 ?>
 
 <style>
-.kitchen-display {
-    background: #f8f9fa;
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
 }
 
+.kitchen-container {
+    padding: 1.5rem;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.kitchen-header {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem 2rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.kitchen-title {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.refresh-info {
+    color: #718096;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.refresh-dot {
+    width: 10px;
+    height: 10px;
+    background: #38ef7d;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.status-tabs {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.tab {
+    padding: 0.75rem 1.5rem;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 50px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+}
+
+.tab.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.tab:hover {
+    transform: translateY(-2px);
+}
+
+.orders-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
 .order-card {
-    transition: all 0.3s;
-    border-left: 5px solid;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    transition: all 0.3s ease;
+    border: 3px solid transparent;
 }
 
 .order-card.pending {
-    border-left-color: #ffc107;
-    background: #fff9e6;
+    border-color: #f5576c;
 }
 
 .order-card.preparing {
-    border-left-color: #17a2b8;
-    background: #e6f7ff;
+    border-color: #ffc107;
 }
 
 .order-card.ready {
-    border-left-color: #28a745;
-    background: #e6ffe6;
+    border-color: #38ef7d;
 }
 
-.order-card.served {
-    border-left-color: #6c757d;
-    background: #f0f0f0;
+.order-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 50px rgba(0,0,0,0.3);
 }
 
-.badge-status {
-    font-size: 0.9rem;
-    padding: 0.5rem 1rem;
+.order-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+.order-invoice {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #2d3748;
 }
 
 .order-time {
     font-size: 0.85rem;
-    color: #6c757d;
+    color: #718096;
 }
 
-.auto-refresh-info {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: rgba(0,0,0,0.7);
+.order-product {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.product-image {
+    width: 60px;
+    height: 60px;
+    border-radius: 10px;
+    object-fit: cover;
+    background: #f7fafc;
+}
+
+.product-info {
+    flex: 1;
+}
+
+.product-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 0.25rem;
+}
+
+.product-qty {
+    display: inline-block;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    padding: 10px 20px;
-    border-radius: 5px;
-    z-index: 1000;
+    padding: 0.25rem 0.75rem;
+    border-radius: 50px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.order-notes {
+    background: #fff3cd;
+    padding: 0.75rem;
+    border-radius: 10px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: #856404;
+}
+
+.order-status {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.status-btn {
+    flex: 1;
+    padding: 0.75rem;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+}
+
+.status-btn.pending {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+}
+
+.status-btn.preparing {
+    background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+    color: white;
+}
+
+.status-btn.ready {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+.status-btn.served {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+}
+
+.status-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: white;
+    font-size: 1.25rem;
+}
+
+.empty-state i {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+@media (max-width: 768px) {
+    .orders-grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
 
-<div class="kitchen-display">
-    <div class="container-fluid py-4">
-        <!-- Header -->
-        <div class="row mb-4">
-            <div class="col-md-6">
-                <h2><i class="fas fa-utensils"></i> Kitchen Display System</h2>
-                <p class="text-muted mb-0">
-                    <i class="fas fa-clock"></i> 
-                    <span id="currentTime"></span>
-                </p>
-            </div>
-            <div class="col-md-6 text-end">
-                <div class="btn-group">
-                    <a href="?status=all" class="btn btn-<?= $status_filter === 'all' ? 'primary' : 'outline-primary' ?>">
-                        Semua
-                    </a>
-                    <a href="?status=pending" class="btn btn-<?= $status_filter === 'pending' ? 'warning' : 'outline-warning' ?>">
-                        Pending
-                    </a>
-                    <a href="?status=preparing" class="btn btn-<?= $status_filter === 'preparing' ? 'info' : 'outline-info' ?>">
-                        Preparing
-                    </a>
-                    <a href="?status=ready" class="btn btn-<?= $status_filter === 'ready' ? 'success' : 'outline-success' ?>">
-                        Ready
-                    </a>
-                    <a href="?status=served" class="btn btn-<?= $status_filter === 'served' ? 'secondary' : 'outline-secondary' ?>">
-                        Served
-                    </a>
-                </div>
-            </div>
+<div class="kitchen-container">
+    <div class="kitchen-header">
+        <div>
+            <h1 class="kitchen-title">🍳 Kitchen Display System</h1>
+            <p style="color: #718096; margin: 0;">Monitor pesanan dapur real-time</p>
         </div>
+        <div class="refresh-info">
+            <span class="refresh-dot"></span>
+            Auto-refresh setiap 5 detik
+        </div>
+    </div>
 
-        <!-- Orders Grid -->
-        <div class="row" id="ordersContainer">
-            <?php if ($result->num_rows == 0): ?>
-                <div class="col-12">
-                    <div class="alert alert-info text-center">
-                        <i class="fas fa-info-circle fa-3x mb-3"></i>
-                        <h5>Tidak ada pesanan</h5>
-                        <p class="mb-0">Pesanan akan muncul di sini secara otomatis</p>
+    <div class="status-tabs">
+        <div class="tab active" onclick="filterStatus('all')">
+            📋 Semua Pesanan
+        </div>
+        <div class="tab" onclick="filterStatus('pending')">
+            🔴 Pending
+        </div>
+        <div class="tab" onclick="filterStatus('preparing')">
+            🟡 Sedang Diproses
+        </div>
+        <div class="tab" onclick="filterStatus('ready')">
+            🟢 Siap Diantar
+        </div>
+    </div>
+
+    <div class="orders-grid" id="ordersGrid">
+        <?php if($orders->num_rows == 0): ?>
+            <div class="empty-state">
+                <i class="fas fa-check-circle"></i>
+                <p>Tidak ada pesanan saat ini</p>
+            </div>
+        <?php else: ?>
+            <?php while($order = $orders->fetch_assoc()): ?>
+            <div class="order-card <?= $order['status'] ?>" data-status="<?= $order['status'] ?>">
+                <div class="order-header">
+                    <div class="order-invoice">#<?= htmlspecialchars($order['invoice_number']) ?></div>
+                    <div class="order-time">
+                        <?php
+                        $time_ago = time() - strtotime($order['created_at']);
+                        $minutes = floor($time_ago / 60);
+                        echo $minutes . ' menit lalu';
+                        ?>
                     </div>
                 </div>
-            <?php else: ?>
-                <?php while ($order = $result->fetch_assoc()): ?>
-                    <div class="col-md-4 col-lg-3 mb-4">
-                        <div class="card order-card <?= $order['kitchen_status'] ?>" 
-                             data-order-id="<?= $order['id'] ?>">
-                            <div class="card-header">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <strong><?= htmlspecialchars($order['transaction_code']) ?></strong>
-                                    <span class="badge bg-<?= getStatusColor($order['kitchen_status']) ?> badge-status">
-                                        <?= ucfirst($order['kitchen_status']) ?>
-                                    </span>
-                                </div>
-                                <div class="order-time mt-1">
-                                    <i class="fas fa-clock"></i>
-                                    <?= date('H:i', strtotime($order['created_at'])) ?>
-                                    <span class="ms-2 text-muted">
-                                        <?= getTimeElapsed($order['created_at']) ?>
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="card-body">
-                                <h5 class="mb-2">
-                                    <i class="fas fa-utensils text-primary"></i>
-                                    <?= htmlspecialchars($order['product_name']) ?>
-                                </h5>
-                                <p class="mb-2">
-                                    <strong>Qty:</strong> 
-                                    <span class="badge bg-dark"><?= $order['quantity'] ?></span>
-                                </p>
-                                <?php if ($order['notes']): ?>
-                                    <div class="alert alert-warning mb-2 py-2">
-                                        <small>
-                                            <i class="fas fa-sticky-note"></i>
-                                            <?= htmlspecialchars($order['notes']) ?>
-                                        </small>
-                                    </div>
-                                <?php endif; ?>
-                                <small class="text-muted">
-                                    Kasir: <?= htmlspecialchars($order['cashier_name']) ?>
-                                </small>
-                            </div>
-                            <div class="card-footer">
-                                <div class="btn-group w-100" role="group">
-                                    <?php if ($order['kitchen_status'] === 'pending'): ?>
-                                        <button class="btn btn-sm btn-info" 
-                                                onclick="updateStatus(<?= $order['id'] ?>, 'preparing')">
-                                            <i class="fas fa-fire"></i> Masak
-                                        </button>
-                                    <?php elseif ($order['kitchen_status'] === 'preparing'): ?>
-                                        <button class="btn btn-sm btn-success" 
-                                                onclick="updateStatus(<?= $order['id'] ?>, 'ready')">
-                                            <i class="fas fa-check"></i> Siap
-                                        </button>
-                                    <?php elseif ($order['kitchen_status'] === 'ready'): ?>
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="updateStatus(<?= $order['id'] ?>, 'served')">
-                                            <i class="fas fa-hand-holding"></i> Sajikan
-                                        </button>
-                                    <?php else: ?>
-                                        <button class="btn btn-sm btn-secondary" disabled>
-                                            <i class="fas fa-check-double"></i> Selesai
-                                        </button>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </div>
+                
+                <div class="order-product">
+                    <?php 
+                    $img = !empty($order['image']) ? 'uploads/products/' . $order['image'] : 'assets/images/no-image.png';
+                    ?>
+                    <img src="<?= $img ?>" alt="" class="product-image" onerror="this.src='assets/images/no-image.png'">
+                    <div class="product-info">
+                        <div class="product-name"><?= htmlspecialchars($order['product_name']) ?></div>
+                        <span class="product-qty">Qty: <?= $order['quantity'] ?></span>
                     </div>
-                <?php endwhile; ?>
-            <?php endif; ?>
-        </div>
+                </div>
+                
+                <?php if($order['notes']): ?>
+                <div class="order-notes">
+                    <strong>Catatan:</strong> <?= htmlspecialchars($order['notes']) ?>
+                </div>
+                <?php endif; ?>
+                
+                <div class="order-status">
+                    <?php if($order['status'] == 'pending'): ?>
+                        <button class="status-btn preparing" onclick="updateStatus(<?= $order['id'] ?>, 'preparing')">
+                            👨‍🍳 Mulai Masak
+                        </button>
+                    <?php elseif($order['status'] == 'preparing'): ?>
+                        <button class="status-btn ready" onclick="updateStatus(<?= $order['id'] ?>, 'ready')">
+                            ✅ Siap Diantar
+                        </button>
+                    <?php elseif($order['status'] == 'ready'): ?>
+                        <button class="status-btn served" onclick="updateStatus(<?= $order['id'] ?>, 'served')">
+                            🚀 Sudah Diantar
+                        </button>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endwhile; ?>
+        <?php endif; ?>
     </div>
 </div>
 
-<!-- Auto Refresh Info -->
-<div class="auto-refresh-info">
-    <i class="fas fa-sync-alt fa-spin"></i>
-    Auto-refresh setiap 5 detik
-</div>
-
 <script>
-// Update current time
-function updateTime() {
-    const now = new Date();
-    const timeString = now.toLocaleTimeString('id-ID', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-    });
-    document.getElementById('currentTime').textContent = timeString;
-}
-
-setInterval(updateTime, 1000);
-updateTime();
-
-// Update kitchen status
-function updateStatus(orderId, newStatus) {
-    if (!confirm('Update status pesanan?')) return;
-    
-    fetch('api/update_kitchen_status.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            order_id: orderId,
-            status: newStatus
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            location.reload();
-        } else {
-            alert('Error: ' + data.message);
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Terjadi kesalahan saat update status');
-    });
-}
-
-// Auto refresh setiap 5 detik
-setInterval(() => {
+// Auto refresh every 5 seconds
+setInterval(function() {
     location.reload();
 }, 5000);
 
-// Sound notification untuk order baru (optional)
-function checkNewOrders() {
-    // Implementasi check new orders bisa ditambahkan di sini
+function filterStatus(status) {
+    // Update active tab
+    document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+    event.target.classList.add('active');
+    
+    // Filter cards
+    const cards = document.querySelectorAll('.order-card');
+    cards.forEach(card => {
+        if (status === 'all' || card.dataset.status === status) {
+            card.style.display = 'block';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+
+function updateStatus(id, newStatus) {
+    if (confirm('Update status pesanan?')) {
+        showLoading();
+        
+        fetch('api/update_kitchen_status.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id, status: newStatus })
+        })
+        .then(res => res.json())
+        .then(data => {
+            hideLoading();
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(err => {
+            hideLoading();
+            alert('Error: ' + err.message);
+        });
+    }
 }
 </script>
 
-<?php 
-include 'footer.php';
-
-// Helper functions
-function getStatusColor($status) {
-    $colors = [
-        'pending' => 'warning',
-        'preparing' => 'info',
-        'ready' => 'success',
-        'served' => 'secondary'
-    ];
-    return $colors[$status] ?? 'secondary';
-}
-
-function getTimeElapsed($time) {
-    $diff = time() - strtotime($time);
-    $minutes = floor($diff / 60);
-    
-    if ($minutes < 1) return 'baru saja';
-    if ($minutes < 60) return $minutes . ' menit lalu';
-    
-    $hours = floor($minutes / 60);
-    return $hours . ' jam lalu';
-}
-?>
+<?php include 'footer.php'; ?>
