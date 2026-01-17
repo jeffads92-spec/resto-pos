@@ -1,486 +1,411 @@
 <?php
-// ============================================
-// DASHBOARD PAGE (FIXED)
-// File: index.php
-// Error Fixed: Unknown column 'status' dan berbagai error lainnya
-// ============================================
-
-session_start();
 require_once 'config.php';
+session_start();
 
-// Cek login
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
-    exit;
+    exit();
 }
 
-// Get today's date
-$today = date('Y-m-d');
-$this_month = date('Y-m');
+// Query untuk data dashboard
+$query_sales_today = "SELECT COALESCE(SUM(total), 0) as total FROM transactions WHERE DATE(created_at) = CURDATE()";
+$result_sales = $conn->query($query_sales_today);
+$sales_today = $result_sales->fetch_assoc()['total'];
 
-// ==========================================
-// 1. TOTAL TRANSAKSI HARI INI
-// ==========================================
-$query_today = "
-    SELECT 
-        COUNT(*) as total_transactions,
-        COALESCE(SUM(total), 0) as total_sales
-    FROM transactions 
-    WHERE DATE(transaction_date) = ?
-    AND status = 'completed'
-";
-$stmt = $conn->prepare($query_today);
-$stmt->bind_param("s", $today);
-$stmt->execute();
-$result_today = $stmt->get_result()->fetch_assoc();
-$stmt->close();
+$query_transactions_today = "SELECT COUNT(*) as count FROM transactions WHERE DATE(created_at) = CURDATE()";
+$result_trans = $conn->query($query_transactions_today);
+$transactions_today = $result_trans->fetch_assoc()['count'];
 
-$today_transactions = $result_today['total_transactions'];
-$today_sales = $result_today['total_sales'];
+$query_products_low = "SELECT COUNT(*) as count FROM products WHERE stock <= stock_min AND stock_min > 0";
+$result_low = $conn->query($query_products_low);
+$products_low_stock = $result_low->fetch_assoc()['count'];
 
-// ==========================================
-// 2. TOTAL TRANSAKSI BULAN INI
-// ==========================================
-$query_month = "
-    SELECT 
-        COUNT(*) as total_transactions,
-        COALESCE(SUM(total), 0) as total_sales,
-        COALESCE(SUM(total - (SELECT COALESCE(SUM(ti.quantity * p.cost_price), 0) 
-                              FROM transaction_items ti 
-                              JOIN products p ON ti.product_id = p.id 
-                              WHERE ti.transaction_id = transactions.id)), 0) as gross_profit
-    FROM transactions 
-    WHERE DATE_FORMAT(transaction_date, '%Y-%m') = ?
-    AND status = 'completed'
-";
-$stmt = $conn->prepare($query_month);
-$stmt->bind_param("s", $this_month);
-$stmt->execute();
-$result_month = $stmt->get_result()->fetch_assoc();
-$stmt->close();
+$query_members = "SELECT COUNT(*) as count FROM members";
+$result_members = $conn->query($query_members);
+$total_members = $result_members->fetch_assoc()['count'];
 
-$month_transactions = $result_month['total_transactions'];
-$month_sales = $result_month['total_sales'];
-$month_profit = $result_month['gross_profit'];
+// Data untuk grafik 7 hari terakhir
+$sales_chart_data = [];
+for ($i = 6; $i >= 0; $i--) {
+    $date = date('Y-m-d', strtotime("-$i days"));
+    $query = "SELECT COALESCE(SUM(total), 0) as total FROM transactions WHERE DATE(created_at) = '$date'";
+    $result = $conn->query($query);
+    $sales_chart_data[] = [
+        'date' => date('d M', strtotime($date)),
+        'total' => $result->fetch_assoc()['total']
+    ];
+}
 
-// ==========================================
-// 3. TOTAL PENGELUARAN BULAN INI
-// ==========================================
-$query_expenses = "
-    SELECT COALESCE(SUM(amount), 0) as total_expenses
-    FROM expenses 
-    WHERE DATE_FORMAT(expense_date, '%Y-%m') = ?
-";
-$stmt = $conn->prepare($query_expenses);
-$stmt->bind_param("s", $this_month);
-$stmt->execute();
-$result_expenses = $stmt->get_result()->fetch_assoc();
-$stmt->close();
-
-$month_expenses = $result_expenses['total_expenses'];
-$net_profit = $month_profit - $month_expenses;
-
-// ==========================================
-// 4. PRODUK STOK MENIPIS
-// ==========================================
-$query_low_stock = "
-    SELECT 
-        id,
-        product_name,
-        stock,
-        min_stock
-    FROM products 
-    WHERE stock <= min_stock 
-    AND is_active = 1
-    ORDER BY stock ASC
-    LIMIT 5
-";
-$low_stock_products = $conn->query($query_low_stock);
-
-// ==========================================
-// 5. TOP 5 PRODUK TERLARIS BULAN INI
-// ==========================================
-$query_top_products = "
-    SELECT 
-        p.product_name,
-        SUM(ti.quantity) as total_sold,
-        SUM(ti.subtotal) as total_revenue
+// Produk Terlaris
+$query_top_products = "SELECT p.name, p.image, SUM(ti.quantity) as qty_sold, SUM(ti.subtotal) as revenue
     FROM transaction_items ti
     JOIN products p ON ti.product_id = p.id
     JOIN transactions t ON ti.transaction_id = t.id
-    WHERE DATE_FORMAT(t.transaction_date, '%Y-%m') = ?
-    AND t.status = 'completed'
-    GROUP BY p.id, p.product_name
-    ORDER BY total_sold DESC
-    LIMIT 5
-";
-$stmt = $conn->prepare($query_top_products);
-$stmt->bind_param("s", $this_month);
-$stmt->execute();
-$top_products = $stmt->get_result();
-$stmt->close();
-
-// ==========================================
-// 6. GRAFIK PENJUALAN 7 HARI TERAKHIR
-// ==========================================
-$sales_data = [];
-$dates = [];
-for ($i = 6; $i >= 0; $i--) {
-    $date = date('Y-m-d', strtotime("-$i days"));
-    $dates[] = date('d M', strtotime($date));
-    
-    $query_daily = "
-        SELECT COALESCE(SUM(total), 0) as daily_sales
-        FROM transactions 
-        WHERE DATE(transaction_date) = ?
-        AND status = 'completed'
-    ";
-    $stmt = $conn->prepare($query_daily);
-    $stmt->bind_param("s", $date);
-    $stmt->execute();
-    $result = $stmt->get_result()->fetch_assoc();
-    $sales_data[] = $result['daily_sales'];
-    $stmt->close();
-}
-
-// ==========================================
-// 7. PESANAN PENDING DI DAPUR
-// ==========================================
-$query_pending = "
-    SELECT COUNT(*) as pending_orders
-    FROM transaction_items 
-    WHERE kitchen_status IN ('pending', 'preparing')
-";
-$result_pending = $conn->query($query_pending);
-$pending_orders = $result_pending->fetch_assoc()['pending_orders'];
+    WHERE DATE(t.created_at) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+    GROUP BY p.id
+    ORDER BY qty_sold DESC
+    LIMIT 5";
+$top_products = $conn->query($query_top_products);
 
 include 'header.php';
 ?>
 
-<div class="container-fluid py-4">
-    <!-- Page Header -->
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <h2><i class="fas fa-chart-line"></i> Dashboard</h2>
-            <p class="text-muted mb-0">
-                Selamat datang, <strong><?= htmlspecialchars($_SESSION['full_name'] ?? 'User') ?></strong>
-            </p>
+<style>
+:root {
+    --primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    --warning: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    --info: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    --danger: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+}
+
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.dashboard-container {
+    padding: 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.welcome-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.3);
+}
+
+.welcome-card h1 {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.stat-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    background: var(--primary);
+}
+
+.stat-card:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.stat-card.success::before {
+    background: var(--success);
+}
+
+.stat-card.warning::before {
+    background: var(--warning);
+}
+
+.stat-card.info::before {
+    background: var(--info);
+}
+
+.stat-card.danger::before {
+    background: var(--danger);
+}
+
+.stat-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    margin-bottom: 1rem;
+    background: var(--primary);
+    color: white;
+}
+
+.stat-card.success .stat-icon {
+    background: var(--success);
+}
+
+.stat-card.warning .stat-icon {
+    background: var(--warning);
+}
+
+.stat-card.info .stat-icon {
+    background: var(--info);
+}
+
+.stat-card.danger .stat-icon {
+    background: var(--danger);
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 0.25rem;
+}
+
+.stat-label {
+    color: #718096;
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.chart-container {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 2rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    margin-bottom: 2rem;
+}
+
+.chart-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 1.5rem;
+}
+
+.products-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+}
+
+.product-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    transition: all 0.3s ease;
+    text-align: center;
+}
+
+.product-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 50px rgba(0,0,0,0.3);
+}
+
+.product-img {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin: 0 auto 1rem;
+    border: 4px solid #f7fafc;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.product-name {
+    font-weight: 600;
+    color: #2d3748;
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+}
+
+.product-stats {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 2px solid #e2e8f0;
+}
+
+.product-stat {
+    text-align: center;
+}
+
+.product-stat-value {
+    font-weight: 700;
+    color: #667eea;
+    font-size: 1.1rem;
+}
+
+.product-stat-label {
+    font-size: 0.75rem;
+    color: #718096;
+}
+
+canvas {
+    max-height: 300px;
+}
+
+@media (max-width: 768px) {
+    .dashboard-container {
+        padding: 1rem;
+    }
+    
+    .stat-cards {
+        grid-template-columns: 1fr;
+    }
+    
+    .products-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<div class="dashboard-container">
+    <div class="welcome-card">
+        <h1>👋 Selamat Datang, <?= htmlspecialchars($_SESSION['username']) ?>!</h1>
+        <p style="color: #718096; font-size: 1.1rem;">Dashboard - <?= date('l, d F Y') ?></p>
+    </div>
+
+    <div class="stat-cards">
+        <div class="stat-card success">
+            <div class="stat-icon">💰</div>
+            <div class="stat-value">Rp <?= number_format($sales_today, 0, ',', '.') ?></div>
+            <div class="stat-label">Penjualan Hari Ini</div>
         </div>
-        <div class="col-md-6 text-end">
-            <div class="btn-group">
-                <a href="pos.php" class="btn btn-primary">
-                    <i class="fas fa-cash-register"></i> Buka POS
-                </a>
-                <a href="kitchen.php" class="btn btn-info text-white">
-                    <i class="fas fa-utensils"></i> Kitchen Display
-                </a>
-            </div>
+
+        <div class="stat-card info">
+            <div class="stat-icon">📊</div>
+            <div class="stat-value"><?= $transactions_today ?></div>
+            <div class="stat-label">Transaksi Hari Ini</div>
+        </div>
+
+        <div class="stat-card warning">
+            <div class="stat-icon">⚠️</div>
+            <div class="stat-value"><?= $products_low_stock ?></div>
+            <div class="stat-label">Produk Stok Menipis</div>
+        </div>
+
+        <div class="stat-card danger">
+            <div class="stat-icon">👥</div>
+            <div class="stat-value"><?= $total_members ?></div>
+            <div class="stat-label">Total Member</div>
         </div>
     </div>
 
-    <!-- Stats Cards -->
-    <div class="row mb-4">
-        <!-- Today's Sales -->
-        <div class="col-md-3">
-            <div class="card stat-card border-primary" style="border-left-color: #667eea !important;">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-2">Penjualan Hari Ini</h6>
-                            <h3 class="mb-0">Rp <?= number_format($today_sales ?? 0, 0, ',', '.') ?></h3>
-                            <small class="text-muted"><?= $today_transactions ?? 0 ?> transaksi</small>
-                        </div>
-                        <div class="text-primary">
-                            <i class="fas fa-dollar-sign fa-3x opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Month's Sales -->
-        <div class="col-md-3">
-            <div class="card stat-card border-success" style="border-left-color: #28a745 !important;">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-2">Penjualan Bulan Ini</h6>
-                            <h3 class="mb-0">Rp <?= number_format($month_sales ?? 0, 0, ',', '.') ?></h3>
-                            <small class="text-muted"><?= $month_transactions ?? 0 ?> transaksi</small>
-                        </div>
-                        <div class="text-success">
-                            <i class="fas fa-chart-line fa-3x opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Net Profit -->
-        <div class="col-md-3">
-            <div class="card stat-card border-info" style="border-left-color: #17a2b8 !important;">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-2">Laba Bersih Bulan Ini</h6>
-                            <h3 class="mb-0 <?= ($net_profit ?? 0) >= 0 ? 'text-success' : 'text-danger' ?>">
-                                Rp <?= number_format($net_profit ?? 0, 0, ',', '.') ?>
-                            </h3>
-                            <small class="text-muted d-none d-md-block">
-                                Kotor: Rp <?= number_format($month_profit ?? 0, 0, ',', '.') ?>
-                            </small>
-                        </div>
-                        <div class="text-info">
-                            <i class="fas fa-piggy-bank fa-3x opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Pending Orders -->
-        <div class="col-md-3">
-            <div class="card stat-card border-warning" style="border-left-color: #ffc107 !important;">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-2">Pesanan Pending</h6>
-                            <h3 class="mb-0"><?= $pending_orders ?? 0 ?></h3>
-                            <small class="text-muted">Di kitchen</small>
-                        </div>
-                        <div class="text-warning">
-                            <i class="fas fa-utensils fa-3x opacity-50"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <div class="chart-container">
+        <h2 class="chart-title">📈 Penjualan 7 Hari Terakhir</h2>
+        <canvas id="salesChart"></canvas>
     </div>
 
-    <div class="row">
-        <!-- Sales Chart -->
-        <div class="col-md-8 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">
-                        <i class="fas fa-chart-area"></i>
-                        Grafik Penjualan 7 Hari Terakhir
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <canvas id="salesChart" height="100"></canvas>
+    <div class="chart-container">
+        <h2 class="chart-title">🏆 Top 5 Produk Terlaris</h2>
+        <div class="products-grid">
+            <?php while($product = $top_products->fetch_assoc()): ?>
+            <div class="product-card">
+                <?php 
+                $img_path = !empty($product['image']) ? 'uploads/products/' . $product['image'] : 'assets/images/no-image.png';
+                ?>
+                <img src="<?= $img_path ?>" alt="<?= htmlspecialchars($product['name']) ?>" class="product-img" onerror="this.src='assets/images/no-image.png'">
+                <div class="product-name"><?= htmlspecialchars($product['name']) ?></div>
+                <div class="product-stats">
+                    <div class="product-stat">
+                        <div class="product-stat-value"><?= $product['qty_sold'] ?></div>
+                        <div class="product-stat-label">Terjual</div>
+                    </div>
+                    <div class="product-stat">
+                        <div class="product-stat-value">Rp <?= number_format($product['revenue']/1000, 0) ?>k</div>
+                        <div class="product-stat-label">Revenue</div>
+                    </div>
                 </div>
             </div>
-        </div>
-
-        <!-- Top Products -->
-        <div class="col-md-4 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">
-                        <i class="fas fa-fire"></i>
-                        Produk Terlaris Bulan Ini
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <?php if ($top_products->num_rows > 0): ?>
-                        <div class="list-group list-group-flush">
-                            <?php $rank = 1; while ($product = $top_products->fetch_assoc()): ?>
-                                <div class="list-group-item px-0">
-                                    <div class="d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <span class="badge bg-primary me-2">#<?= $rank++ ?></span>
-                                            <strong><?= htmlspecialchars($product['product_name']) ?></strong>
-                                            <br>
-                                            <small class="text-muted">
-                                                <?= $product['total_sold'] ?> terjual
-                                            </small>
-                                        </div>
-                                        <div class="text-end">
-                                            <strong class="text-success">
-                                                Rp <?= number_format($product['total_revenue'], 0, ',', '.') ?>
-                                            </strong>
-                                        </div>
-                                    </div>
-                                </div>
-                            <?php endwhile; ?>
-                        </div>
-                    <?php else: ?>
-                        <div class="text-center text-muted py-4">
-                            <i class="fas fa-inbox fa-3x mb-3"></i>
-                            <p>Belum ada penjualan bulan ini</p>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row">
-        <!-- Low Stock Alert -->
-        <div class="col-md-6 mb-4">
-            <div class="card">
-                <div class="card-header bg-danger text-white">
-                    <h5 class="mb-0">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        Stok Menipis
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <?php if ($low_stock_products->num_rows > 0): ?>
-                        <div class="table-responsive">
-                            <table class="table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>Produk</th>
-                                        <th>Stok</th>
-                                        <th>Min. Stok</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php while ($item = $low_stock_products->fetch_assoc()): ?>
-                                        <tr>
-                                            <td><?= htmlspecialchars($item['product_name']) ?></td>
-                                            <td>
-                                                <span class="badge bg-danger">
-                                                    <?= $item['stock'] ?>
-                                                </span>
-                                            </td>
-                                            <td><?= $item['min_stock'] ?></td>
-                                            <td>
-                                                <span class="badge bg-warning">
-                                                    Perlu Restock
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    <?php endwhile; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="text-center mt-3">
-                            <a href="products.php" class="btn btn-sm btn-outline-primary">
-                                Lihat Semua Produk
-                            </a>
-                        </div>
-                    <?php else: ?>
-                        <div class="text-center text-muted py-4">
-                            <i class="fas fa-check-circle fa-3x mb-3 text-success"></i>
-                            <p>Semua stok aman</p>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-
-        <!-- Quick Stats -->
-        <div class="col-md-6 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">
-                        <i class="fas fa-info-circle"></i>
-                        Ringkasan Bulan Ini
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3 pb-3 border-bottom">
-                        <div class="d-flex justify-content-between">
-                            <span>Total Penjualan</span>
-                            <strong class="text-primary">
-                                Rp <?= number_format($month_sales ?? 0, 0, ',', '.') ?>
-                            </strong>
-                        </div>
-                    </div>
-                    <div class="mb-3 pb-3 border-bottom">
-                        <div class="d-flex justify-content-between">
-                            <span>Laba Kotor</span>
-                            <strong class="text-success">
-                                Rp <?= number_format($month_profit ?? 0, 0, ',', '.') ?>
-                            </strong>
-                        </div>
-                    </div>
-                    <div class="mb-3 pb-3 border-bottom">
-                        <div class="d-flex justify-content-between">
-                            <span>Pengeluaran</span>
-                            <strong class="text-danger">
-                                Rp <?= number_format($month_expenses ?? 0, 0, ',', '.') ?>
-                            </strong>
-                        </div>
-                    </div>
-                    <div class="mb-0">
-                        <div class="d-flex justify-content-between">
-                            <span><strong>Laba Bersih</strong></span>
-                            <strong class="<?= ($net_profit ?? 0) >= 0 ? 'text-success' : 'text-danger' ?>">
-                                Rp <?= number_format($net_profit ?? 0, 0, ',', '.') ?>
-                            </strong>
-                        </div>
-                    </div>
-                    
-                    <?php if (($_SESSION['role'] ?? '') === 'admin'): ?>
-                    <div class="text-center mt-4">
-                        <a href="reports.php" class="btn btn-primary btn-sm">
-                            <i class="fas fa-file-alt"></i>
-                            Lihat Laporan Lengkap
-                        </a>
-                    </div>
-                    <?php endif; ?>
-                </div>
-            </div>
+            <?php endwhile; ?>
         </div>
     </div>
 </div>
 
-<!-- Chart.js Script -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Sales Chart
-    const ctx = document.getElementById('salesChart').getContext('2d');
-    const salesChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: <?= json_encode($dates) ?>,
-            datasets: [{
-                label: 'Penjualan (Rp)',
-                data: <?= json_encode($sales_data) ?>,
-                backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                borderColor: 'rgba(102, 126, 234, 1)',
-                borderWidth: 2,
-                tension: 0.4,
-                fill: true,
-                pointBackgroundColor: 'rgba(102, 126, 234, 1)',
-                pointBorderColor: '#fff',
-                pointBorderWidth: 2,
-                pointRadius: 4,
-                pointHoverRadius: 6
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return 'Rp ' + context.parsed.y.toLocaleString('id-ID');
-                        }
-                    }
-                }
+const ctx = document.getElementById('salesChart').getContext('2d');
+const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+gradient.addColorStop(0, 'rgba(102, 126, 234, 0.5)');
+gradient.addColorStop(1, 'rgba(118, 75, 162, 0.1)');
+
+new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: <?= json_encode(array_column($sales_chart_data, 'date')) ?>,
+        datasets: [{
+            label: 'Penjualan (Rp)',
+            data: <?= json_encode(array_column($sales_chart_data, 'total')) ?>,
+            backgroundColor: gradient,
+            borderColor: '#667eea',
+            borderWidth: 3,
+            fill: true,
+            tension: 0.4,
+            pointBackgroundColor: '#fff',
+            pointBorderColor: '#667eea',
+            pointBorderWidth: 3,
+            pointRadius: 5,
+            pointHoverRadius: 7
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+            legend: {
+                display: false
             },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return 'Rp ' + (value / 1000) + 'k';
-                        }
+            tooltip: {
+                backgroundColor: 'rgba(0,0,0,0.8)',
+                padding: 12,
+                cornerRadius: 8,
+                callbacks: {
+                    label: function(context) {
+                        return 'Rp ' + context.parsed.y.toLocaleString('id-ID');
                     }
                 }
             }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return 'Rp ' + (value/1000) + 'k';
+                    }
+                },
+                grid: {
+                    color: 'rgba(0,0,0,0.05)'
+                }
+            },
+            x: {
+                grid: {
+                    display: false
+                }
+            }
         }
-    });
+    }
 });
 </script>
 
