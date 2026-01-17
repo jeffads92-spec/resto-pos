@@ -1,255 +1,484 @@
 <?php
-session_start();
 require_once 'config.php';
+session_start();
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
-    exit;
+    exit();
 }
 
-$user_role = $_SESSION['user_role'];
-$is_admin = ($user_role === 'admin');
+// Pagination
+$page = isset($_GET['page']) ? intval($_GET['page']) : 1;
+$limit = 20;
+$offset = ($page - 1) * $limit;
 
-// Get transactions with filters
-$where = "WHERE 1=1";
-if (isset($_GET['date'])) {
-    $date = $_GET['date'];
-    $where .= " AND DATE(t.created_at) = '$date'";
-}
-if (isset($_GET['payment_method']) && $_GET['payment_method'] != '') {
-    $method = $_GET['payment_method'];
-    $where .= " AND t.payment_method = '$method'";
-}
-if (isset($_GET['cashier']) && $_GET['cashier'] != '') {
-    $cashier_id = $_GET['cashier'];
-    $where .= " AND t.user_id = '$cashier_id'";
+// Filter
+$search = isset($_GET['search']) ? $conn->real_escape_string($_GET['search']) : '';
+$date_from = isset($_GET['date_from']) ? $_GET['date_from'] : date('Y-m-01');
+$date_to = isset($_GET['date_to']) ? $_GET['date_to'] : date('Y-m-d');
+
+// Build query
+$where = "DATE(t.created_at) BETWEEN '$date_from' AND '$date_to'";
+if ($search) {
+    $where .= " AND (t.invoice_number LIKE '%$search%' OR u.username LIKE '%$search%' OR m.name LIKE '%$search%')";
 }
 
-$query = "SELECT t.*, u.username as cashier_name, m.member_name, m.phone as member_phone
-          FROM transactions t
-          LEFT JOIN users u ON t.user_id = u.id
-          LEFT JOIN members m ON t.member_id = m.id
-          $where
-          ORDER BY t.created_at DESC
-          LIMIT 100";
-$result = mysqli_query($conn, $query);
+// Get transactions - FIX: Add error handling
+try {
+    $query = "SELECT t.*, u.username, m.name as member_name 
+              FROM transactions t
+              LEFT JOIN users u ON t.user_id = u.id
+              LEFT JOIN members m ON t.member_id = m.id
+              WHERE $where
+              ORDER BY t.created_at DESC
+              LIMIT $limit OFFSET $offset";
+    $transactions = $conn->query($query);
+    
+    if (!$transactions) {
+        throw new Exception($conn->error);
+    }
+} catch (Exception $e) {
+    die("Database Error: " . $e->getMessage());
+}
 
-// Get cashiers for filter
-$cashiers_query = "SELECT id, username FROM users WHERE status = 'active'";
-$cashiers_result = mysqli_query($conn, $cashiers_query);
+// Count total
+$count_query = "SELECT COUNT(*) as total FROM transactions t 
+                LEFT JOIN users u ON t.user_id = u.id
+                LEFT JOIN members m ON t.member_id = m.id
+                WHERE $where";
+$total_records = $conn->query($count_query)->fetch_assoc()['total'];
+$total_pages = ceil($total_records / $limit);
 
 include 'header.php';
 ?>
 
-<div class="container-fluid py-4">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h2><i class="fas fa-receipt"></i> Riwayat Transaksi</h2>
-        </div>
+<style>
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+}
+
+.transactions-container {
+    padding: 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.page-header {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.page-title {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 1rem 0;
+}
+
+.filter-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.filter-form {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr auto;
+    gap: 1rem;
+    align-items: end;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.btn-filter {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 0.75rem 2rem;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-filter:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.transactions-table {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+thead {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+th {
+    color: white;
+    padding: 1rem;
+    text-align: left;
+    font-weight: 600;
+}
+
+tbody tr {
+    border-bottom: 1px solid #e2e8f0;
+    transition: all 0.3s ease;
+}
+
+tbody tr:hover {
+    background: #f7fafc;
+}
+
+td {
+    padding: 1rem;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 50px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.badge-success {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+.badge-warning {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+}
+
+.badge-danger {
+    background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    color: white;
+}
+
+.btn-detail {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-detail:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(79, 172, 254, 0.4);
+}
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 2rem;
+}
+
+.pagination a {
+    padding: 0.5rem 1rem;
+    background: white;
+    border-radius: 10px;
+    text-decoration: none;
+    color: #667eea;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.pagination a:hover,
+.pagination a.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    transform: translateY(-2px);
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(5px);
+}
+
+.modal-content {
+    background: white;
+    margin: 5% auto;
+    padding: 0;
+    border-radius: 20px;
+    max-width: 600px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+
+.modal-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1.5rem 2rem;
+    border-radius: 20px 20px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-body {
+    padding: 2rem;
+}
+
+.close {
+    font-size: 2rem;
+    font-weight: bold;
+    cursor: pointer;
+    color: white;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: #718096;
+}
+
+.detail-value {
+    color: #2d3748;
+    font-weight: 600;
+}
+
+.items-table {
+    margin-top: 1.5rem;
+}
+
+.items-table table {
+    background: #f7fafc;
+    border-radius: 10px;
+}
+
+.items-table th {
+    background: #e2e8f0;
+    color: #2d3748;
+    padding: 0.75rem;
+}
+
+.items-table td {
+    padding: 0.75rem;
+}
+
+@media (max-width: 768px) {
+    .filter-form {
+        grid-template-columns: 1fr;
+    }
+    
+    table {
+        font-size: 0.85rem;
+    }
+    
+    th, td {
+        padding: 0.5rem;
+    }
+}
+</style>
+
+<div class="transactions-container">
+    <div class="page-header">
+        <h1 class="page-title">📝 Riwayat Transaksi</h1>
+        <p style="color: #718096;">Semua transaksi penjualan</p>
     </div>
 
-    <!-- Filter -->
-    <div class="card shadow-sm mb-4">
-        <div class="card-body">
-            <form method="GET" class="row g-3">
-                <div class="col-md-3">
-                    <label class="form-label">Tanggal</label>
-                    <input type="date" class="form-control" name="date" value="<?php echo isset($_GET['date']) ? $_GET['date'] : ''; ?>">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Metode Pembayaran</label>
-                    <select class="form-select" name="payment_method">
-                        <option value="">-- Semua --</option>
-                        <option value="cash" <?php echo (isset($_GET['payment_method']) && $_GET['payment_method'] == 'cash') ? 'selected' : ''; ?>>Tunai</option>
-                        <option value="qris" <?php echo (isset($_GET['payment_method']) && $_GET['payment_method'] == 'qris') ? 'selected' : ''; ?>>QRIS</option>
-                        <option value="transfer" <?php echo (isset($_GET['payment_method']) && $_GET['payment_method'] == 'transfer') ? 'selected' : ''; ?>>Transfer</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Kasir</label>
-                    <select class="form-select" name="cashier">
-                        <option value="">-- Semua --</option>
-                        <?php while ($cashier = mysqli_fetch_assoc($cashiers_result)): ?>
-                        <option value="<?php echo $cashier['id']; ?>" 
-                                <?php echo (isset($_GET['cashier']) && $_GET['cashier'] == $cashier['id']) ? 'selected' : ''; ?>>
-                            <?php echo htmlspecialchars($cashier['username']); ?>
-                        </option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">&nbsp;</label>
-                    <div>
-                        <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-filter"></i> Filter
-                        </button>
-                        <a href="transactions.php" class="btn btn-secondary">
-                            <i class="fas fa-redo"></i> Reset
-                        </a>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Transactions Table -->
-    <div class="card shadow-sm">
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-hover" id="transactionsTable">
-                    <thead>
-                        <tr>
-                            <th>Invoice</th>
-                            <th>Tanggal</th>
-                            <th>Kasir</th>
-                            <th>Member</th>
-                            <th>Items</th>
-                            <th>Total</th>
-                            <th>Pembayaran</th>
-                            <th>Status</th>
-                            <th>Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php while ($trx = mysqli_fetch_assoc($result)): ?>
-                        <tr>
-                            <td>
-                                <strong><?php echo $trx['invoice_number']; ?></strong>
-                            </td>
-                            <td><?php echo date('d/m/Y H:i', strtotime($trx['created_at'])); ?></td>
-                            <td><?php echo htmlspecialchars($trx['cashier_name']); ?></td>
-                            <td>
-                                <?php if ($trx['member_id']): ?>
-                                <span class="badge bg-info">
-                                    <?php echo htmlspecialchars($trx['member_name']); ?>
-                                </span>
-                                <?php else: ?>
-                                <span class="text-muted">-</span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <button class="btn btn-sm btn-link" onclick="viewItems(<?php echo $trx['id']; ?>)">
-                                    <i class="fas fa-list"></i> Lihat Items
-                                </button>
-                            </td>
-                            <td>
-                                <strong>Rp <?php echo number_format($trx['total_amount'], 0, ',', '.'); ?></strong>
-                            </td>
-                            <td>
-                                <?php
-                                $payment_badges = [
-                                    'cash' => '<span class="badge bg-success">Tunai</span>',
-                                    'qris' => '<span class="badge bg-primary">QRIS</span>',
-                                    'transfer' => '<span class="badge bg-info">Transfer</span>'
-                                ];
-                                echo $payment_badges[$trx['payment_method']];
-                                ?>
-                            </td>
-                            <td>
-                                <?php if ($trx['status'] == 'completed'): ?>
-                                <span class="badge bg-success">Selesai</span>
-                                <?php else: ?>
-                                <span class="badge bg-warning">Pending</span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <button class="btn btn-sm btn-info" onclick="viewDetail(<?php echo $trx['id']; ?>)">
-                                    <i class="fas fa-eye"></i>
-                                </button>
-                                <a href="print_receipt.php?id=<?php echo $trx['id']; ?>" target="_blank" class="btn btn-sm btn-secondary">
-                                    <i class="fas fa-print"></i>
-                                </a>
-                                <?php if ($is_admin): ?>
-                                <button class="btn btn-sm btn-danger" onclick="deleteTransaction(<?php echo $trx['id']; ?>)">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                        <?php endwhile; ?>
-                    </tbody>
-                </table>
+    <div class="filter-card">
+        <form class="filter-form" method="GET">
+            <div class="form-group">
+                <label>Cari Invoice / Kasir / Member</label>
+                <input type="text" name="search" class="form-control" placeholder="Cari..." value="<?= htmlspecialchars($search) ?>">
             </div>
-        </div>
+            <div class="form-group">
+                <label>Dari Tanggal</label>
+                <input type="date" name="date_from" class="form-control" value="<?= $date_from ?>">
+            </div>
+            <div class="form-group">
+                <label>Sampai Tanggal</label>
+                <input type="date" name="date_to" class="form-control" value="<?= $date_to ?>">
+            </div>
+            <button type="submit" class="btn-filter">🔍 Filter</button>
+        </form>
     </div>
+
+    <div class="transactions-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Invoice</th>
+                    <th>Tanggal</th>
+                    <th>Kasir</th>
+                    <th>Member</th>
+                    <th>Total</th>
+                    <th>Pembayaran</th>
+                    <th>Status</th>
+                    <th>Aksi</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php while($row = $transactions->fetch_assoc()): ?>
+                <tr>
+                    <td><strong><?= $row['invoice_number'] ?></strong></td>
+                    <td><?= date('d/m/Y H:i', strtotime($row['created_at'])) ?></td>
+                    <td><?= htmlspecialchars($row['username']) ?></td>
+                    <td><?= $row['member_name'] ? htmlspecialchars($row['member_name']) : '-' ?></td>
+                    <td><strong>Rp <?= number_format($row['total'], 0, ',', '.') ?></strong></td>
+                    <td><?= strtoupper($row['payment_method']) ?></td>
+                    <td>
+                        <?php if($row['status'] == 'completed'): ?>
+                            <span class="badge badge-success">Selesai</span>
+                        <?php elseif($row['status'] == 'pending'): ?>
+                            <span class="badge badge-warning">Pending</span>
+                        <?php else: ?>
+                            <span class="badge badge-danger">Dibatalkan</span>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <button class="btn-detail" onclick="showDetail(<?= $row['id'] ?>)">Detail</button>
+                    </td>
+                </tr>
+                <?php endwhile; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <?php if($total_pages > 1): ?>
+    <div class="pagination">
+        <?php for($i = 1; $i <= $total_pages; $i++): ?>
+            <a href="?page=<?= $i ?>&search=<?= $search ?>&date_from=<?= $date_from ?>&date_to=<?= $date_to ?>" 
+               class="<?= $page == $i ? 'active' : '' ?>">
+                <?= $i ?>
+            </a>
+        <?php endfor; ?>
+    </div>
+    <?php endif; ?>
 </div>
 
-<!-- Detail Modal -->
-<div class="modal fade" id="detailModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Detail Transaksi</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="detailContent">
-                <div class="text-center py-5">
-                    <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                </div>
-            </div>
+<!-- Modal Detail -->
+<div id="detailModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 style="margin: 0;">Detail Transaksi</h2>
+            <span class="close" onclick="closeModal()">&times;</span>
         </div>
-    </div>
-</div>
-
-<!-- Items Modal -->
-<div class="modal fade" id="itemsModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Items Transaksi</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="itemsContent">
-                <div class="text-center py-5">
-                    <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                </div>
-            </div>
+        <div class="modal-body" id="modalBody">
+            Loading...
         </div>
     </div>
 </div>
 
 <script>
-function viewDetail(id) {
+function showDetail(id) {
+    document.getElementById('detailModal').style.display = 'block';
+    
     fetch('api/get_transaction_detail.php?id=' + id)
-        .then(response => response.json())
+        .then(res => res.json())
         .then(data => {
-            if (data.success) {
-                const trx = data.transaction;
+            if(data.success) {
+                const t = data.transaction;
+                const items = data.items;
+                
                 let html = `
-                    <div class="row mb-3">
-                        <div class="col-6">
-                            <strong>Invoice:</strong> ${trx.invoice_number}
-                        </div>
-                        <div class="col-6 text-end">
-                            <strong>Tanggal:</strong> ${trx.created_at}
-                        </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Invoice:</span>
+                        <span class="detail-value">${t.invoice_number}</span>
                     </div>
-                    <div class="row mb-3">
-                        <div class="col-6">
-                            <strong>Kasir:</strong> ${trx.cashier_name}
-                        </div>
-                        <div class="col-6 text-end">
-                            <strong>Member:</strong> ${trx.member_name || '-'}
-                        </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Tanggal:</span>
+                        <span class="detail-value">${t.created_at}</span>
                     </div>
-                    <hr>
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Produk</th>
-                                <th>Qty</th>
-                                <th>Harga</th>
-                                <th>Subtotal</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+                    <div class="detail-row">
+                        <span class="detail-label">Kasir:</span>
+                        <span class="detail-value">${t.username}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Member:</span>
+                        <span class="detail-value">${t.member_name || '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Subtotal:</span>
+                        <span class="detail-value">Rp ${parseInt(t.subtotal).toLocaleString('id-ID')}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Diskon:</span>
+                        <span class="detail-value">Rp ${parseInt(t.discount).toLocaleString('id-ID')}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Pajak:</span>
+                        <span class="detail-value">Rp ${parseInt(t.tax).toLocaleString('id-ID')}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Total:</span>
+                        <span class="detail-value"><strong>Rp ${parseInt(t.total).toLocaleString('id-ID')}</strong></span>
+                    </div>
+                    
+                    <div class="items-table">
+                        <h4>Item Pesanan:</h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Produk</th>
+                                    <th>Qty</th>
+                                    <th>Harga</th>
+                                    <th>Subtotal</th>
+                                </tr>
+                            </thead>
+                            <tbody>
                 `;
                 
-                data.items.forEach(item => {
+                items.forEach(item => {
                     html += `
                         <tr>
                             <td>${item.product_name}</td>
@@ -261,94 +490,29 @@ function viewDetail(id) {
                 });
                 
                 html += `
-                        </tbody>
-                    </table>
-                    <hr>
-                    <div class="row">
-                        <div class="col-6">Subtotal</div>
-                        <div class="col-6 text-end">Rp ${parseInt(trx.subtotal).toLocaleString('id-ID')}</div>
-                    </div>
-                    <div class="row">
-                        <div class="col-6">Diskon Member</div>
-                        <div class="col-6 text-end">- Rp ${parseInt(trx.discount_amount || 0).toLocaleString('id-ID')}</div>
-                    </div>
-                    <div class="row">
-                        <div class="col-6">Pajak (${trx.tax_rate}%)</div>
-                        <div class="col-6 text-end">Rp ${parseInt(trx.tax_amount).toLocaleString('id-ID')}</div>
-                    </div>
-                    <div class="row mt-2">
-                        <div class="col-6"><strong>TOTAL</strong></div>
-                        <div class="col-6 text-end"><strong>Rp ${parseInt(trx.total_amount).toLocaleString('id-ID')}</strong></div>
-                    </div>
-                    <hr>
-                    <div class="row">
-                        <div class="col-6">Pembayaran</div>
-                        <div class="col-6 text-end">${trx.payment_method.toUpperCase()}</div>
-                    </div>
-                    <div class="row">
-                        <div class="col-6">Bayar</div>
-                        <div class="col-6 text-end">Rp ${parseInt(trx.amount_paid).toLocaleString('id-ID')}</div>
-                    </div>
-                    <div class="row">
-                        <div class="col-6">Kembalian</div>
-                        <div class="col-6 text-end">Rp ${parseInt(trx.change_amount).toLocaleString('id-ID')}</div>
+                            </tbody>
+                        </table>
                     </div>
                 `;
                 
-                document.getElementById('detailContent').innerHTML = html;
-                new bootstrap.Modal(document.getElementById('detailModal')).show();
+                document.getElementById('modalBody').innerHTML = html;
             }
+        })
+        .catch(err => {
+            document.getElementById('modalBody').innerHTML = 'Error: ' + err.message;
         });
 }
 
-function viewItems(id) {
-    fetch('api/get_transaction_items.php?id=' + id)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                let html = '<table class="table table-sm"><thead><tr><th>Produk</th><th>Qty</th><th>Harga</th></tr></thead><tbody>';
-                data.items.forEach(item => {
-                    html += `<tr>
-                        <td>${item.product_name}</td>
-                        <td>${item.quantity}</td>
-                        <td>Rp ${parseInt(item.price).toLocaleString('id-ID')}</td>
-                    </tr>`;
-                });
-                html += '</tbody></table>';
-                
-                document.getElementById('itemsContent').innerHTML = html;
-                new bootstrap.Modal(document.getElementById('itemsModal')).show();
-            }
-        });
+function closeModal() {
+    document.getElementById('detailModal').style.display = 'none';
 }
 
-function deleteTransaction(id) {
-    if (!confirm('Yakin ingin menghapus transaksi ini? Stok akan dikembalikan.')) return;
-    
-    fetch('api/delete_transaction.php', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: id})
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('Transaksi berhasil dihapus');
-            location.reload();
-        } else {
-            alert('Error: ' + data.message);
-        }
-    });
+window.onclick = function(event) {
+    const modal = document.getElementById('detailModal');
+    if (event.target == modal) {
+        closeModal();
+    }
 }
-
-$(document).ready(function() {
-    $('#transactionsTable').DataTable({
-        order: [[1, 'desc']],
-        language: {
-            url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/id.json'
-        }
-    });
-});
 </script>
 
 <?php include 'footer.php'; ?>
