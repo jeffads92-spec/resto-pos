@@ -1,657 +1,666 @@
 <?php
-// ============================================
-// POINT OF SALE (POS) PAGE
-// File: pos.php
-// ============================================
-
-session_start();
 require_once 'config.php';
+session_start();
 
-// Cek login
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
-    exit;
+    exit();
 }
 
-// Get products with categories (FIXED: product_name bukan name)
-$products_query = "
-    SELECT 
-        p.id,
-        p.product_name,
-        p.category_id,
-        p.price,
-        p.stock,
-        p.image,
-        c.name as category_name
-    FROM products p
-    LEFT JOIN categories c ON p.category_id = c.id
-    WHERE p.is_active = 1 AND p.stock > 0
-    ORDER BY c.name, p.product_name
-";
-$products = $conn->query($products_query);
-
 // Get categories
-$categories_query = "SELECT * FROM categories WHERE is_active = 1 ORDER BY name";
-$categories = $conn->query($categories_query);
+$categories = $conn->query("SELECT * FROM categories ORDER BY name");
 
-// Get members untuk dropdown
-$members_query = "SELECT id, member_code, name, points FROM members WHERE is_active = 1 ORDER BY name";
-$members = $conn->query($members_query);
+// Get products
+$products = $conn->query("SELECT p.*, c.name as category_name FROM products p 
+                          LEFT JOIN categories c ON p.category_id = c.id 
+                          WHERE p.is_active = 1 AND p.stock > 0
+                          ORDER BY c.name, p.name");
+
+// Get members
+$members = $conn->query("SELECT * FROM members ORDER BY name");
 
 include 'header.php';
 ?>
 
 <style>
 .pos-container {
-    background: #f8f9fa;
-    min-height: calc(100vh - 56px);
+    display: grid;
+    grid-template-columns: 1fr 400px;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    height: calc(100vh - 100px);
 }
 
-.product-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 15px;
-    max-height: 60vh;
+/* Left Panel - Products */
+.products-panel {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
     overflow-y: auto;
 }
 
-.product-card {
-    background: white;
-    border-radius: 10px;
-    padding: 15px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.3s;
-    border: 2px solid transparent;
+.search-bar {
+    margin-bottom: 1.5rem;
+    position: relative;
 }
 
-.product-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+.search-input {
+    width: 100%;
+    padding: 1rem 1rem 1rem 3rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 50px;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.search-input:focus {
+    outline: none;
     border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.product-card.out-of-stock {
-    opacity: 0.5;
-    cursor: not-allowed;
+.search-icon {
+    position: absolute;
+    left: 1.2rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #718096;
 }
 
-.product-image {
+.category-filters {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.category-btn {
+    padding: 0.5rem 1.5rem;
+    border: 2px solid #e2e8f0;
+    background: white;
+    border-radius: 50px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.category-btn:hover, .category-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: #667eea;
+    transform: translateY(-2px);
+}
+
+.products-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 1rem;
+}
+
+.product-item {
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 15px;
+    padding: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+}
+
+.product-item:hover {
+    border-color: #667eea;
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(102, 126, 234, 0.2);
+}
+
+.product-item img {
     width: 80px;
     height: 80px;
     object-fit: cover;
-    border-radius: 8px;
-    margin-bottom: 10px;
+    border-radius: 10px;
+    margin-bottom: 0.75rem;
 }
 
-.cart-container {
-    background: white;
-    border-radius: 10px;
-    padding: 20px;
-    height: calc(100vh - 100px);
+.product-item-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+    color: #2d3748;
+}
+
+.product-item-price {
+    color: #667eea;
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.product-item-stock {
+    font-size: 0.75rem;
+    color: #718096;
+    margin-top: 0.25rem;
+}
+
+/* Right Panel - Cart */
+.cart-panel {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
     display: flex;
     flex-direction: column;
+}
+
+.cart-header {
+    font-size: 1.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1rem;
+}
+
+.member-select {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    margin-bottom: 1rem;
 }
 
 .cart-items {
     flex: 1;
     overflow-y: auto;
-    margin-bottom: 20px;
+    margin-bottom: 1rem;
 }
 
 .cart-item {
+    background: #f7fafc;
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
     display: flex;
-    justify-content: space-between;
+    gap: 1rem;
     align-items: center;
-    padding: 10px;
-    border-bottom: 1px solid #eee;
 }
 
-.cart-summary {
-    border-top: 2px solid #eee;
-    padding-top: 15px;
+.cart-item img {
+    width: 50px;
+    height: 50px;
+    border-radius: 8px;
+    object-fit: cover;
 }
 
-.category-filter {
+.cart-item-details {
+    flex: 1;
+}
+
+.cart-item-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+}
+
+.cart-item-price {
+    color: #667eea;
+    font-size: 0.85rem;
+}
+
+.cart-item-qty {
     display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-}
-
-.category-btn {
-    padding: 8px 15px;
-    border-radius: 20px;
-    border: 2px solid #ddd;
-    background: white;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-
-.category-btn.active {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border-color: #667eea;
-}
-
-.qty-control {
-    display: flex;
+    gap: 0.5rem;
     align-items: center;
-    gap: 10px;
 }
 
 .qty-btn {
     width: 30px;
     height: 30px;
-    border-radius: 50%;
     border: none;
-    background: #667eea;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
+    border-radius: 50%;
     cursor: pointer;
-    font-weight: bold;
+    font-weight: 700;
 }
 
 .qty-btn:hover {
-    background: #764ba2;
+    transform: scale(1.1);
 }
 
-.total-display {
-    font-size: 2rem;
-    font-weight: bold;
+.qty-input {
+    width: 50px;
+    text-align: center;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0.25rem;
+    font-weight: 600;
+}
+
+.remove-btn {
+    background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.cart-summary {
+    border-top: 2px solid #e2e8f0;
+    padding-top: 1rem;
+}
+
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    font-size: 0.95rem;
+}
+
+.summary-label {
+    color: #718096;
+}
+
+.summary-value {
+    font-weight: 700;
+    color: #2d3748;
+}
+
+.total-row {
+    font-size: 1.25rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 2px solid #e2e8f0;
+}
+
+.total-row .summary-value {
+    color: #667eea;
+    font-size: 1.5rem;
+}
+
+.payment-section {
+    margin-top: 1rem;
+}
+
+.payment-method {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.payment-btn {
+    padding: 0.75rem;
+    border: 2px solid #e2e8f0;
+    background: white;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.payment-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: #667eea;
+}
+
+.cash-input {
+    width: 100%;
+    padding: 1rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.change-display {
+    background: #e7f3ff;
+    padding: 1rem;
+    border-radius: 10px;
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+.change-label {
+    font-size: 0.9rem;
+    color: #718096;
+}
+
+.change-amount {
+    font-size: 1.5rem;
+    font-weight: 700;
     color: #667eea;
 }
 
-@media (max-width: 768px) {
-    .product-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
-    }
-    
-    .product-card {
-        padding: 10px;
-    }
-    
-    .product-image {
-        width: 60px;
-        height: 60px;
-    }
-    
-    .cart-container {
-        height: auto;
-        min-height: 400px;
-    }
-    
-    .cart-item {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-    }
-    
-    .qty-control {
-        width: 100%;
-        justify-content: space-between;
-    }
-    
-    .total-display {
-        font-size: 1.5rem;
-    }
+.checkout-btn {
+    width: 100%;
+    padding: 1.25rem;
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+    border: none;
+    border-radius: 15px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s ease;
 }
 
-@media (max-width: 576px) {
-    .category-filter {
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        padding-bottom: 10px;
+.checkout-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 25px rgba(17, 153, 142, 0.4);
+}
+
+.checkout-btn:disabled {
+    background: #cbd5e0;
+    cursor: not-allowed;
+}
+
+@media (max-width: 1200px) {
+    .pos-container {
+        grid-template-columns: 1fr;
+        height: auto;
     }
     
-    .category-btn {
-        white-space: nowrap;
+    .cart-panel {
+        position: sticky;
+        bottom: 0;
+        max-height: 50vh;
     }
 }
 </style>
 
 <div class="pos-container">
-    <div class="container-fluid py-3">
-        <div class="row mb-3">
-            <div class="col-md-12">
-                <h3><i class="fas fa-cash-register"></i> Point of Sale</h3>
+    <!-- Left Panel - Products -->
+    <div class="products-panel">
+        <div class="search-bar">
+            <i class="fas fa-search search-icon"></i>
+            <input type="text" class="search-input" id="searchProduct" placeholder="Cari menu...">
+        </div>
+        
+        <div class="category-filters">
+            <button class="category-btn active" data-category="all">
+                <i class="fas fa-th"></i> Semua
+            </button>
+            <?php while($cat = $categories->fetch_assoc()): ?>
+            <button class="category-btn" data-category="<?= $cat['id'] ?>">
+                <?= htmlspecialchars($cat['name']) ?>
+            </button>
+            <?php endwhile; ?>
+        </div>
+        
+        <div class="products-grid" id="productsGrid">
+            <?php while($product = $products->fetch_assoc()): ?>
+            <div class="product-item" 
+                 data-category="<?= $product['category_id'] ?>"
+                 data-name="<?= strtolower($product['name']) ?>"
+                 onclick='addToCart(<?= json_encode($product) ?>)'>
+                <?php 
+                $img = !empty($product['image']) ? 'uploads/products/' . $product['image'] : 'assets/images/no-image.png';
+                ?>
+                <img src="<?= $img ?>" alt="<?= htmlspecialchars($product['name']) ?>" onerror="this.src='assets/images/no-image.png'">
+                <div class="product-item-name"><?= htmlspecialchars($product['name']) ?></div>
+                <div class="product-item-price">Rp <?= number_format($product['price'], 0, ',', '.') ?></div>
+                <div class="product-item-stock">Stok: <?= $product['stock'] ?></div>
+            </div>
+            <?php endwhile; ?>
+        </div>
+    </div>
+    
+    <!-- Right Panel - Cart -->
+    <div class="cart-panel">
+        <h2 class="cart-header">🛒 Keranjang</h2>
+        
+        <select class="member-select" id="memberSelect">
+            <option value="">Pelanggan Umum</option>
+            <?php while($member = $members->fetch_assoc()): ?>
+            <option value="<?= $member['id'] ?>" data-discount="<?= $member['discount'] ?>">
+                <?= htmlspecialchars($member['name']) ?> (<?= $member['discount'] ?>% disc)
+            </option>
+            <?php endwhile; ?>
+        </select>
+        
+        <div class="cart-items" id="cartItems">
+            <div style="text-align: center; color: #cbd5e0; padding: 2rem;">
+                <i class="fas fa-shopping-cart" style="font-size: 3rem;"></i>
+                <p style="margin-top: 1rem;">Keranjang kosong</p>
             </div>
         </div>
-
-        <div class="row">
-            <!-- Left Side - Products -->
-            <div class="col-md-8">
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">Pilih Produk</h5>
-                    </div>
-                    <div class="card-body">
-                        <!-- Category Filter -->
-                        <div class="category-filter">
-                            <button class="category-btn active" onclick="filterCategory('all')">
-                                Semua
-                            </button>
-                            <?php 
-                            $categories->data_seek(0);
-                            while ($cat = $categories->fetch_assoc()): 
-                            ?>
-                                <button class="category-btn" onclick="filterCategory(<?= $cat['id'] ?>)">
-                                    <?= htmlspecialchars($cat['name']) ?>
-                                </button>
-                            <?php endwhile; ?>
-                        </div>
-
-                        <!-- Search -->
-                        <div class="mb-3">
-                            <input type="text" id="searchProduct" class="form-control" 
-                                   placeholder="Cari produk..." onkeyup="searchProducts()">
-                        </div>
-
-                        <!-- Product Grid -->
-                        <div class="product-grid" id="productGrid">
-                            <?php while ($product = $products->fetch_assoc()): ?>
-                                <div class="product-card" 
-                                     data-category="<?= $product['category_id'] ?>"
-                                     data-name="<?= strtolower($product['product_name']) ?>"
-                                     onclick='addToCart(<?= json_encode($product) ?>)'>
-                                    <?php if ($product['image'] && file_exists('uploads/products/' . $product['image'])): ?>
-                                        <img src="uploads/products/<?= htmlspecialchars($product['image']) ?>" 
-                                             class="product-image" 
-                                             alt="<?= htmlspecialchars($product['product_name']) ?>"
-                                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                        <div class="product-image bg-light d-none align-items-center justify-content-center" style="display: none !important;">
-                                            <i class="fas fa-image fa-2x text-muted"></i>
-                                        </div>
-                                    <?php else: ?>
-                                        <div class="product-image bg-light d-flex align-items-center justify-content-center">
-                                            <i class="fas fa-utensils fa-2x text-muted"></i>
-                                        </div>
-                                    <?php endif; ?>
-                                    <div class="fw-bold"><?= htmlspecialchars($product['product_name']) ?></div>
-                                    <div class="text-success fw-bold">
-                                        Rp <?= number_format($product['price'], 0, ',', '.') ?>
-                                    </div>
-                                    <small class="text-muted">Stok: <?= $product['stock'] ?></small>
-                                </div>
-                            <?php endwhile; ?>
-                        </div>
-                    </div>
+        
+        <div class="cart-summary">
+            <div class="summary-row">
+                <span class="summary-label">Subtotal:</span>
+                <span class="summary-value" id="subtotal">Rp 0</span>
+            </div>
+            <div class="summary-row">
+                <span class="summary-label">Diskon:</span>
+                <span class="summary-value" id="discount">Rp 0</span>
+            </div>
+            <div class="summary-row">
+                <span class="summary-label">Pajak (10%):</span>
+                <span class="summary-value" id="tax">Rp 0</span>
+            </div>
+            <div class="summary-row total-row">
+                <span class="summary-label">TOTAL:</span>
+                <span class="summary-value" id="total">Rp 0</span>
+            </div>
+        </div>
+        
+        <div class="payment-section">
+            <div class="payment-method">
+                <button class="payment-btn active" data-method="cash">
+                    <i class="fas fa-money-bill"></i><br>Tunai
+                </button>
+                <button class="payment-btn" data-method="qris">
+                    <i class="fas fa-qrcode"></i><br>QRIS
+                </button>
+                <button class="payment-btn" data-method="transfer">
+                    <i class="fas fa-university"></i><br>Transfer
+                </button>
+            </div>
+            
+            <div id="cashPayment">
+                <input type="number" class="cash-input" id="cashAmount" placeholder="Jumlah Uang..." oninput="calculateChange()">
+                <div class="change-display">
+                    <div class="change-label">Kembalian</div>
+                    <div class="change-amount" id="changeAmount">Rp 0</div>
                 </div>
             </div>
-
-            <!-- Right Side - Cart -->
-            <div class="col-md-4">
-                <div class="cart-container">
-                    <h5 class="mb-3"><i class="fas fa-shopping-cart"></i> Keranjang</h5>
-                    
-                    <!-- Member Selection -->
-                    <div class="mb-3">
-                        <label class="form-label">Member (Optional)</label>
-                        <select class="form-select" id="memberId" onchange="updateMemberInfo()">
-                            <option value="">Non-Member</option>
-                            <?php while ($member = $members->fetch_assoc()): ?>
-                                <option value="<?= $member['id'] ?>" data-points="<?= $member['points'] ?>">
-                                    <?= htmlspecialchars($member['name']) ?> 
-                                    (<?= $member['member_code'] ?>) - <?= $member['points'] ?> pts
-                                </option>
-                            <?php endwhile; ?>
-                        </select>
-                        <div id="memberInfo" class="mt-2"></div>
-                    </div>
-
-                    <!-- Cart Items -->
-                    <div class="cart-items" id="cartItems">
-                        <div class="text-center text-muted py-5">
-                            <i class="fas fa-shopping-cart fa-3x mb-3"></i>
-                            <p>Keranjang kosong</p>
-                        </div>
-                    </div>
-
-                    <!-- Cart Summary -->
-                    <div class="cart-summary">
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>Subtotal:</span>
-                            <strong id="subtotal">Rp 0</strong>
-                        </div>
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>Pajak (<?= TAX_RATE ?>%):</span>
-                            <strong id="tax">Rp 0</strong>
-                        </div>
-                        <div class="d-flex justify-content-between mb-3">
-                            <span>Diskon:</span>
-                            <input type="number" id="discount" class="form-control form-control-sm w-50 text-end" 
-                                   value="0" min="0" onchange="calculateTotal()">
-                        </div>
-                        <hr>
-                        <div class="d-flex justify-content-between mb-3">
-                            <span class="h5">TOTAL:</span>
-                            <span class="total-display" id="total">Rp 0</span>
-                        </div>
-
-                        <!-- Payment Method -->
-                        <div class="mb-3">
-                            <label class="form-label">Metode Pembayaran</label>
-                            <select class="form-select" id="paymentMethod" onchange="togglePaymentInput()">
-                                <option value="cash">Tunai</option>
-                                <option value="qris">QRIS</option>
-                                <option value="transfer">Transfer</option>
-                                <option value="debit">Kartu Debit</option>
-                                <option value="credit">Kartu Kredit</option>
-                            </select>
-                        </div>
-
-                        <!-- Payment Amount (for cash) -->
-                        <div id="cashPayment" class="mb-3">
-                            <label class="form-label">Jumlah Bayar</label>
-                            <input type="number" id="paymentAmount" class="form-control" 
-                                   min="0" onkeyup="calculateChange()">
-                            <div id="change" class="mt-2"></div>
-                        </div>
-
-                        <!-- Notes -->
-                        <div class="mb-3">
-                            <label class="form-label">Catatan</label>
-                            <textarea id="notes" class="form-control" rows="2"></textarea>
-                        </div>
-
-                        <!-- Action Buttons -->
-                        <div class="d-grid gap-2">
-                            <button class="btn btn-primary btn-lg" onclick="processPayment()" id="btnPay" disabled>
-                                <i class="fas fa-check-circle"></i> Proses Pembayaran
-                            </button>
-                            <button class="btn btn-danger" onclick="clearCart()">
-                                <i class="fas fa-trash"></i> Hapus Semua
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            
+            <button class="checkout-btn" id="checkoutBtn" onclick="processCheckout()">
+                <i class="fas fa-check-circle"></i> Proses Pembayaran
+            </button>
         </div>
     </div>
 </div>
 
 <script>
 let cart = [];
+let paymentMethod = 'cash';
 
-// Add to cart
-function addToCart(product) {
-    const existingItem = cart.find(item => item.id === product.id);
-    
-    if (existingItem) {
-        if (existingItem.quantity < product.stock) {
-            existingItem.quantity++;
+// Category filter
+document.querySelectorAll('.category-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        
+        const category = this.dataset.category;
+        filterProducts(category);
+    });
+});
+
+function filterProducts(category) {
+    document.querySelectorAll('.product-item').forEach(item => {
+        if (category === 'all' || item.dataset.category === category) {
+            item.style.display = 'block';
         } else {
-            alert('Stok tidak mencukupi!');
-            return;
+            item.style.display = 'none';
         }
+    });
+}
+
+// Search
+document.getElementById('searchProduct').addEventListener('input', function() {
+    const search = this.value.toLowerCase();
+    document.querySelectorAll('.product-item').forEach(item => {
+        const name = item.dataset.name;
+        item.style.display = name.includes(search) ? 'block' : 'none';
+    });
+});
+
+// Payment method
+document.querySelectorAll('.payment-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.payment-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        paymentMethod = this.dataset.method;
+        
+        document.getElementById('cashPayment').style.display = paymentMethod === 'cash' ? 'block' : 'none';
+    });
+});
+
+function addToCart(product) {
+    const existing = cart.find(item => item.id === product.id);
+    
+    if (existing) {
+        existing.qty++;
     } else {
         cart.push({
             id: product.id,
-            product_name: product.product_name,
+            name: product.name,
             price: parseFloat(product.price),
-            quantity: 1,
+            image: product.image,
+            qty: 1,
             stock: product.stock
         });
     }
     
-    updateCart();
+    renderCart();
 }
 
-// Update cart display
-function updateCart() {
-    const cartItemsDiv = document.getElementById('cartItems');
+function updateQty(index, change) {
+    if (cart[index].qty + change > 0 && cart[index].qty + change <= cart[index].stock) {
+        cart[index].qty += change;
+        renderCart();
+    }
+}
+
+function removeItem(index) {
+    cart.splice(index, 1);
+    renderCart();
+}
+
+function renderCart() {
+    const container = document.getElementById('cartItems');
     
     if (cart.length === 0) {
-        cartItemsDiv.innerHTML = `
-            <div class="text-center text-muted py-5">
-                <i class="fas fa-shopping-cart fa-3x mb-3"></i>
-                <p>Keranjang kosong</p>
+        container.innerHTML = `
+            <div style="text-align: center; color: #cbd5e0; padding: 2rem;">
+                <i class="fas fa-shopping-cart" style="font-size: 3rem;"></i>
+                <p style="margin-top: 1rem;">Keranjang kosong</p>
             </div>
         `;
-        document.getElementById('btnPay').disabled = true;
     } else {
-        let html = '';
-        cart.forEach((item, index) => {
-            html += `
-                <div class="cart-item">
-                    <div class="cart-item-info">
-                        <strong>${item.product_name}</strong><br>
-                        <small class="text-muted">Rp ${item.price.toLocaleString('id-ID')} × ${item.quantity}</small>
-                        <br>
-                        <small class="text-success fw-bold">
-                            = Rp ${(item.price * item.quantity).toLocaleString('id-ID')}
-                        </small>
-                    </div>
-                    <div class="qty-control">
-                        <button class="qty-btn" onclick="updateQuantity(${index}, -1)" title="Kurangi">
-                            −
-                        </button>
-                        <input type="number" 
-                               class="qty-input"
-                               value="${item.quantity}" 
-                               min="1" 
-                               max="${item.stock}"
-                               onchange="setQuantity(${index}, this.value)"
-                               onclick="this.select()">
-                        <button class="qty-btn" onclick="updateQuantity(${index}, 1)" title="Tambah">
-                            +
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="removeItem(${index})" title="Hapus">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
+        container.innerHTML = cart.map((item, index) => `
+            <div class="cart-item">
+                <img src="${item.image ? 'uploads/products/' + item.image : 'assets/images/no-image.png'}" 
+                     onerror="this.src='assets/images/no-image.png'">
+                <div class="cart-item-details">
+                    <div class="cart-item-name">${item.name}</div>
+                    <div class="cart-item-price">Rp ${item.price.toLocaleString('id-ID')}</div>
                 </div>
-            `;
-        });
-        cartItemsDiv.innerHTML = html;
-        document.getElementById('btnPay').disabled = false;
+                <div class="cart-item-qty">
+                    <button class="qty-btn" onclick="updateQty(${index}, -1)">-</button>
+                    <input type="number" class="qty-input" value="${item.qty}" readonly>
+                    <button class="qty-btn" onclick="updateQty(${index}, 1)">+</button>
+                </div>
+                <button class="remove-btn" onclick="removeItem(${index})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `).join('');
     }
     
     calculateTotal();
 }
 
-// Set quantity directly from input
-function setQuantity(index, value) {
-    const item = cart[index];
-    const qty = parseInt(value) || 1;
-    
-    if (qty <= 0) {
-        removeItem(index);
-    } else if (qty <= item.stock) {
-        item.quantity = qty;
-        updateCart();
-    } else {
-        alert('Stok tidak mencukupi! Maksimal: ' + item.stock);
-        updateCart(); // Reset to previous value
-    }
-}
-
-// Update quantity
-function updateQuantity(index, change) {
-    const item = cart[index];
-    const newQty = item.quantity + change;
-    
-    if (newQty <= 0) {
-        removeItem(index);
-    } else if (newQty <= item.stock) {
-        item.quantity = newQty;
-        updateCart();
-    } else {
-        alert('Stok tidak mencukupi!');
-    }
-}
-
-// Remove item
-function removeItem(index) {
-    cart.splice(index, 1);
-    updateCart();
-}
-
-// Clear cart
-function clearCart() {
-    if (confirm('Hapus semua item di keranjang?')) {
-        cart = [];
-        document.getElementById('discount').value = 0;
-        document.getElementById('paymentAmount').value = '';
-        updateCart();
-    }
-}
-
-// Calculate total
 function calculateTotal() {
-    const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const tax = subtotal * (<?= TAX_RATE ?> / 100);
-    const discount = parseFloat(document.getElementById('discount').value) || 0;
-    const total = subtotal + tax - discount;
+    const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    
+    const memberSelect = document.getElementById('memberSelect');
+    const discountPercent = memberSelect.selectedOptions[0]?.dataset.discount || 0;
+    const discount = subtotal * (discountPercent / 100);
+    
+    const tax = (subtotal - discount) * 0.1;
+    const total = subtotal - discount + tax;
     
     document.getElementById('subtotal').textContent = 'Rp ' + subtotal.toLocaleString('id-ID');
+    document.getElementById('discount').textContent = 'Rp ' + discount.toLocaleString('id-ID');
     document.getElementById('tax').textContent = 'Rp ' + tax.toLocaleString('id-ID');
     document.getElementById('total').textContent = 'Rp ' + total.toLocaleString('id-ID');
     
     calculateChange();
 }
 
-// Calculate change
 function calculateChange() {
     const total = parseFloat(document.getElementById('total').textContent.replace(/[^0-9]/g, ''));
-    const payment = parseFloat(document.getElementById('paymentAmount').value) || 0;
-    const change = payment - total;
+    const cash = parseFloat(document.getElementById('cashAmount').value) || 0;
+    const change = cash - total;
     
-    const changeDiv = document.getElementById('change');
-    if (payment > 0) {
-        if (change >= 0) {
-            changeDiv.innerHTML = `<div class="alert alert-success">Kembalian: <strong>Rp ${change.toLocaleString('id-ID')}</strong></div>`;
-        } else {
-            changeDiv.innerHTML = `<div class="alert alert-danger">Uang kurang: Rp ${Math.abs(change).toLocaleString('id-ID')}</div>`;
-        }
-    } else {
-        changeDiv.innerHTML = '';
-    }
+    document.getElementById('changeAmount').textContent = 'Rp ' + (change > 0 ? change : 0).toLocaleString('id-ID');
+    
+    const checkoutBtn = document.getElementById('checkoutBtn');
+    checkoutBtn.disabled = cart.length === 0 || (paymentMethod === 'cash' && change < 0);
 }
 
-// Toggle payment input
-function togglePaymentInput() {
-    const method = document.getElementById('paymentMethod').value;
-    const cashDiv = document.getElementById('cashPayment');
-    
-    if (method === 'cash') {
-        cashDiv.style.display = 'block';
-    } else {
-        cashDiv.style.display = 'none';
-    }
-}
+document.getElementById('memberSelect').addEventListener('change', calculateTotal);
 
-// Filter category
-function filterCategory(categoryId) {
-    const buttons = document.querySelectorAll('.category-btn');
-    buttons.forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+function processCheckout() {
+    if (cart.length === 0) return;
     
-    const products = document.querySelectorAll('.product-card');
-    products.forEach(product => {
-        if (categoryId === 'all' || product.dataset.category == categoryId) {
-            product.style.display = 'block';
-        } else {
-            product.style.display = 'none';
-        }
-    });
-}
-
-// Search products
-function searchProducts() {
-    const search = document.getElementById('searchProduct').value.toLowerCase();
-    const products = document.querySelectorAll('.product-card');
+    showLoading();
     
-    products.forEach(product => {
-        const name = product.dataset.name;
-        if (name.includes(search)) {
-            product.style.display = 'block';
-        } else {
-            product.style.display = 'none';
-        }
-    });
-}
-
-// Update member info
-function updateMemberInfo() {
-    const select = document.getElementById('memberId');
-    const option = select.options[select.selectedIndex];
-    const infoDiv = document.getElementById('memberInfo');
-    
-    if (option.value) {
-        const points = option.dataset.points;
-        infoDiv.innerHTML = `<small class="text-info"><i class="fas fa-star"></i> Points: ${points}</small>`;
-    } else {
-        infoDiv.innerHTML = '';
-    }
-}
-
-// Process payment
-async function processPayment() {
-    if (cart.length === 0) {
-        alert('Keranjang kosong!');
-        return;
-    }
-    
-    const paymentMethod = document.getElementById('paymentMethod').value;
-    const paymentAmount = parseFloat(document.getElementById('paymentAmount').value) || 0;
-    const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const tax = subtotal * (<?= TAX_RATE ?> / 100);
-    const discount = parseFloat(document.getElementById('discount').value) || 0;
-    const total = subtotal + tax - discount;
-    
-    // Validasi payment untuk cash
-    if (paymentMethod === 'cash' && paymentAmount < total) {
-        alert('Jumlah pembayaran kurang!');
-        return;
-    }
+    const total = parseFloat(document.getElementById('total').textContent.replace(/[^0-9]/g, ''));
     
     const data = {
         items: cart,
-        subtotal: subtotal,
-        tax: tax,
-        discount: discount,
-        total: total,
+        member_id: document.getElementById('memberSelect').value || null,
         payment_method: paymentMethod,
-        payment_amount: paymentMethod === 'cash' ? paymentAmount : total,
-        change_amount: paymentMethod === 'cash' ? (paymentAmount - total) : 0,
-        member_id: document.getElementById('memberId').value || null,
-        notes: document.getElementById('notes').value
+        cash_amount: paymentMethod === 'cash' ? document.getElementById('cashAmount').value : total,
+        total: total
     };
     
-    try {
-        const response = await fetch('api/process_transaction.php', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(data)
-        });
-        
-        const result = await response.json();
-        
+    fetch('api/process_transaction.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(res => res.json())
+    .then(result => {
+        hideLoading();
         if (result.success) {
-            alert('Transaksi berhasil!\nKode: ' + result.transaction_code);
+            alert('✅ Transaksi berhasil!\nInvoice: ' + result.invoice);
+            cart = [];
+            renderCart();
+            document.getElementById('cashAmount').value = '';
             
-            // Print receipt (optional)
             if (confirm('Print struk?')) {
                 window.open('print_receipt.php?id=' + result.transaction_id, '_blank');
             }
-            
-            // Clear cart
-            cart = [];
-            document.getElementById('discount').value = 0;
-            document.getElementById('paymentAmount').value = '';
-            document.getElementById('notes').value = '';
-            document.getElementById('memberId').value = '';
-            updateCart();
         } else {
-            alert('Error: ' + result.message);
+            alert('❌ Error: ' + result.message);
         }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Terjadi kesalahan saat memproses transaksi');
-    }
+    })
+    .catch(err => {
+        hideLoading();
+        alert('❌ Terjadi kesalahan: ' + err.message);
+    });
 }
 </script>
 
