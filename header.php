@@ -1,316 +1,238 @@
-<?php
-// ============================================
-// HEADER & NAVIGATION
-// File: header.php
-// ============================================
-
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit;
-}
-
-$current_page = basename($_SERVER['PHP_SELF']);
-$is_admin = ($_SESSION['role'] === 'admin');
-?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= APP_NAME ?></title>
+    <title>Smart Resto POS</title>
+    
+    <!-- jQuery (PENTING: Load duluan!) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     
     <!-- Bootstrap 5 -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     
-    <!-- Font Awesome 6 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
     <style>
-        :root {
-            --primary-color: #667eea;
-            --secondary-color: #764ba2;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
         
         body {
-            background: #f8f9fa;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
         }
         
-        .navbar {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        .navbar-custom {
+            background: rgba(255, 255, 255, 0.95) !important;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            padding: 1rem 2rem;
         }
         
         .navbar-brand {
-            font-weight: 700;
+            font-weight: 800;
             font-size: 1.5rem;
-        }
-        
-        .sidebar {
-            background: white;
-            min-height: calc(100vh - 56px);
-            box-shadow: 2px 0 10px rgba(0,0,0,0.05);
-            padding: 20px 0;
-        }
-        
-        @media (max-width: 768px) {
-            .sidebar {
-                position: fixed;
-                left: -250px;
-                top: 56px;
-                width: 250px;
-                height: calc(100vh - 56px);
-                z-index: 1000;
-                transition: left 0.3s;
-            }
-            
-            .sidebar.show {
-                left: 0;
-            }
-            
-            .main-content {
-                margin-left: 0 !important;
-            }
-            
-            .overlay {
-                display: none;
-                position: fixed;
-                top: 56px;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0,0,0,0.5);
-                z-index: 999;
-            }
-            
-            .overlay.show {
-                display: block;
-            }
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
         
         .nav-link {
-            color: #6c757d;
-            padding: 12px 20px;
-            margin: 5px 15px;
-            border-radius: 8px;
-            transition: all 0.3s;
+            color: #2d3748 !important;
+            font-weight: 600;
+            padding: 0.5rem 1rem !important;
+            border-radius: 50px;
+            transition: all 0.3s ease;
         }
         
         .nav-link:hover {
-            background: #f8f9fa;
-            color: var(--primary-color);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white !important;
         }
         
         .nav-link.active {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-            color: white;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white !important;
         }
         
-        .nav-link i {
+        .dropdown-menu {
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            border: none;
+            margin-top: 0.5rem;
+        }
+        
+        .dropdown-item {
+            padding: 0.75rem 1.5rem;
+            transition: all 0.3s ease;
+        }
+        
+        .dropdown-item:hover {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white !important;
+        }
+        
+        .dropdown-item i {
             width: 20px;
-            margin-right: 10px;
-        }
-        
-        .main-content {
-            padding: 20px;
-        }
-        
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            margin-bottom: 20px;
-        }
-        
-        .card-header {
-            background: white;
-            border-bottom: 2px solid #f8f9fa;
-            padding: 15px 20px;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-            border: none;
-        }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-        }
-        
-        .stat-card {
-            border-left: 4px solid;
-            transition: transform 0.3s;
-        }
-        
-        .stat-card:hover {
-            transform: translateY(-5px);
-        }
-        
-        .table {
-            background: white;
-        }
-        
-        .badge {
-            padding: 5px 10px;
+            margin-right: 0.5rem;
         }
     </style>
 </head>
 <body>
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container-fluid">
-            <button class="navbar-toggler me-2 d-lg-none" type="button" onclick="toggleSidebar()">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            
-            <a class="navbar-brand" href="index.php">
-                <i class="fas fa-utensils"></i>
-                <?= APP_NAME ?>
-            </a>
-            
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle text-white" href="#" id="userDropdown" role="button" 
-                           data-bs-toggle="dropdown">
-                            <i class="fas fa-user-circle"></i>
-                            <?= htmlspecialchars($_SESSION['full_name'] ?? 'User') ?>
-                            <span class="badge bg-light text-dark ms-2">
-                                <?= ucfirst($_SESSION['role'] ?? 'guest') ?>
-                            </span>
-                        </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li>
-                                <span class="dropdown-item-text">
-                                    <strong><?= htmlspecialchars($_SESSION['full_name'] ?? 'User') ?></strong><br>
-                                    <small class="text-muted"><?= htmlspecialchars($_SESSION['username'] ?? '') ?></small>
-                                </span>
-                            </li>
-                            <li><hr class="dropdown-divider"></li>
-                            <?php if ($is_admin): ?>
-                            <li>
-                                <a class="dropdown-item" href="users.php">
-                                    <i class="fas fa-users-cog me-2"></i>
-                                    Manajemen User
-                                </a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="settings.php">
-                                    <i class="fas fa-cog me-2"></i>
-                                    Pengaturan
-                                </a>
-                            </li>
-                            <li><hr class="dropdown-divider"></li>
-                            <?php endif; ?>
-                            <li>
-                                <a class="dropdown-item text-danger" href="logout.php">
-                                    <i class="fas fa-sign-out-alt me-2"></i>
-                                    Logout
-                                </a>
-                            </li>
-                        </ul>
-                    </li>
-                </ul>
-            </div>
-        </div>
-    </nav>
 
+<nav class="navbar navbar-expand-lg navbar-light navbar-custom">
     <div class="container-fluid">
-        <div class="row">
-            <!-- Overlay untuk mobile -->
-            <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
-            
-            <!-- Sidebar -->
-            <nav class="col-md-2 d-md-block sidebar" id="sidebar">
-                <div class="position-sticky">
-                    <ul class="nav flex-column">
-                        <li class="nav-item">
-                            <a class="nav-link <?= $current_page == 'index.php' ? 'active' : '' ?>" 
-                               href="index.php">
-                                <i class="fas fa-chart-line"></i>
-                                Dashboard
-                            </a>
-                        </li>
-                        
-                        <li class="nav-item">
-                            <a class="nav-link <?= $current_page == 'pos.php' ? 'active' : '' ?>" 
-                               href="pos.php">
-                                <i class="fas fa-cash-register"></i>
-                                Point of Sale
-                            </a>
-                        </li>
-                        
-                        <li class="nav-item">
-                            <a class="nav-link <?= $current_page == 'products.php' ? 'active' : '' ?>" 
-                               href="products.php">
-                                <i class="fas fa-box"></i>
-                                Produk
-                            </a>
-                        </li>
-                        
-                        <li class="nav-item">
-                            <a class="nav-link <?= $current_page == 'kitchen.php' ? 'active' : '' ?>" 
-                               href="kitchen.php">
-                                <i class="fas fa-utensils"></i>
-                                Kitchen Display
-                            </a>
-                        </li>
-                        
-                        <li class="nav-item">
-                            <a class="nav-link <?= $current_page == 'members.php' ? 'active' : '' ?>" 
-                               href="members.php">
-                                <i class="fas fa-users"></i>
-                                Member
-                            </a>
-                        </li>
-                        
-                        <?php if ($is_admin): ?>
-                        <li class="nav-item">
-                            <a class="nav-link <?= $current_page == 'expenses.php' ? 'active' : '' ?>" 
-                               href="expenses.php">
-                                <i class="fas fa-money-bill-wave"></i>
-                                Pengeluaran
-                            </a>
-                        </li>
-                        
-                        <li class="nav-item">
-                            <a class="nav-link <?= $current_page == 'reports.php' ? 'active' : '' ?>" 
-                               href="reports.php">
-                                <i class="fas fa-file-alt"></i>
-                                Laporan
-                            </a>
-                        </li>
-                        
-                        <li class="nav-item">
-                            <a class="nav-link <?= $current_page == 'users.php' ? 'active' : '' ?>" 
-                               href="users.php">
-                                <i class="fas fa-users-cog"></i>
-                                Users
-                            </a>
-                        </li>
-                        <?php endif; ?>
-                        
-                        <li class="nav-item mt-3">
-                            <hr>
-                        </li>
-                        
-                        <li class="nav-item">
-                            <a class="nav-link text-danger" href="logout.php">
-                                <i class="fas fa-sign-out-alt"></i>
-                                Logout
-                            </a>
-                        </li>
+        <a class="navbar-brand" href="index.php">
+            <i class="fas fa-utensils"></i> Smart Resto POS
+        </a>
+        
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="index.php"><i class="fas fa-chart-line"></i> Dashboard</a>
+                </li>
+                
+                <li class="nav-item">
+                    <a class="nav-link" href="pos.php"><i class="fas fa-cash-register"></i> POS</a>
+                </li>
+                
+                <!-- DROPDOWN PRODUK - MANUAL TRIGGER -->
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="dropdownProduk" role="button">
+                        <i class="fas fa-box"></i> Produk
+                    </a>
+                    <ul class="dropdown-menu" id="menuProduk">
+                        <li><a class="dropdown-item" href="products.php"><i class="fas fa-list"></i> Daftar Produk</a></li>
+                        <li><a class="dropdown-item" href="inventory.php"><i class="fas fa-boxes"></i> Inventaris</a></li>
                     </ul>
-                </div>
-            </nav>
+                </li>
+                
+                <li class="nav-item">
+                    <a class="nav-link" href="transactions.php"><i class="fas fa-receipt"></i> Transaksi</a>
+                </li>
+                
+                <li class="nav-item">
+                    <a class="nav-link" href="members.php"><i class="fas fa-users"></i> Member</a>
+                </li>
+                
+                <?php if (isset($_SESSION['role']) && $_SESSION['role'] == 'admin'): ?>
+                <!-- DROPDOWN ADMIN - MANUAL TRIGGER -->
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="dropdownAdmin" role="button">
+                        <i class="fas fa-cog"></i> Admin
+                    </a>
+                    <ul class="dropdown-menu" id="menuAdmin">
+                        <li><a class="dropdown-item" href="reports.php"><i class="fas fa-chart-bar"></i> Laporan</a></li>
+                        <li><a class="dropdown-item" href="expenses.php"><i class="fas fa-money-bill"></i> Pengeluaran</a></li>
+                        <li><a class="dropdown-item" href="users.php"><i class="fas fa-user-shield"></i> Kelola User</a></li>
+                        <li><a class="dropdown-item" href="settings.php"><i class="fas fa-sliders-h"></i> Pengaturan</a></li>
+                    </ul>
+                </li>
+                <?php endif; ?>
+                
+                <li class="nav-item">
+                    <a class="nav-link" href="kitchen.php"><i class="fas fa-fire"></i> Dapur</a>
+                </li>
+            </ul>
+            
+            <ul class="navbar-nav">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="dropdownUser" role="button">
+                        <i class="fas fa-user-circle"></i> <?= $_SESSION['username'] ?>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end" id="menuUser">
+                        <li><a class="dropdown-item" href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
 
-            <!-- Main Content -->
-            <main class="col-md-10 ms-sm-auto main-content"><?php // Content starts here ?>
+<script>
+// MANUAL DROPDOWN TOGGLE (PASTI JALAN!)
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Initializing manual dropdowns...');
+    
+    // Dropdown Produk
+    const dropdownProduk = document.getElementById('dropdownProduk');
+    const menuProduk = document.getElementById('menuProduk');
+    
+    if (dropdownProduk && menuProduk) {
+        dropdownProduk.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Toggle menu
+            if (menuProduk.style.display === 'block') {
+                menuProduk.style.display = 'none';
+            } else {
+                // Hide all other menus
+                document.querySelectorAll('.dropdown-menu').forEach(m => m.style.display = 'none');
+                menuProduk.style.display = 'block';
+            }
+        });
+    }
+    
+    // Dropdown Admin
+    const dropdownAdmin = document.getElementById('dropdownAdmin');
+    const menuAdmin = document.getElementById('menuAdmin');
+    
+    if (dropdownAdmin && menuAdmin) {
+        dropdownAdmin.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Toggle menu
+            if (menuAdmin.style.display === 'block') {
+                menuAdmin.style.display = 'none';
+            } else {
+                // Hide all other menus
+                document.querySelectorAll('.dropdown-menu').forEach(m => m.style.display = 'none');
+                menuAdmin.style.display = 'block';
+            }
+        });
+    }
+    
+    // Dropdown User
+    const dropdownUser = document.getElementById('dropdownUser');
+    const menuUser = document.getElementById('menuUser');
+    
+    if (dropdownUser && menuUser) {
+        dropdownUser.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // Toggle menu
+            if (menuUser.style.display === 'block') {
+                menuUser.style.display = 'none';
+            } else {
+                // Hide all other menus
+                document.querySelectorAll('.dropdown-menu').forEach(m => m.style.display = 'none');
+                menuUser.style.display = 'block';
+            }
+        });
+    }
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.dropdown')) {
+            document.querySelectorAll('.dropdown-menu').forEach(menu => {
+                menu.style.display = 'none';
+            });
+        }
+    });
+    
+    console.log('Manual dropdowns initialized!');
+});
+</script>
