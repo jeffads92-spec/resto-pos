@@ -1,66 +1,41 @@
 <?php
-// ============================================
-// API: Update Kitchen Status (FIXED)
-// File: api/update_kitchen_status.php
-// Error Fixed: menggunakan transaction_items
-// ============================================
-
-session_start();
 require_once '../config.php';
+session_start();
 
 header('Content-Type: application/json');
 
-// Cek login
 if (!isset($_SESSION['user_id'])) {
     echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-    exit;
+    exit();
 }
 
-try {
-    $data = json_decode(file_get_contents('php://input'), true);
-    
-    if (!isset($data['order_id']) || !isset($data['status'])) {
-        throw new Exception('Data tidak lengkap');
-    }
-    
-    $order_id = intval($data['order_id']);
-    $status = $data['status'];
-    
-    // Validasi status
-    $valid_statuses = ['pending', 'preparing', 'ready', 'served'];
-    if (!in_array($status, $valid_statuses)) {
-        throw new Exception('Status tidak valid');
-    }
-    
-    // Update status di transaction_items (FIXED)
-    $stmt = $conn->prepare("
-        UPDATE transaction_items 
-        SET kitchen_status = ?,
-            updated_at = NOW()
-        WHERE id = ?
-    ");
-    
-    $stmt->bind_param("si", $status, $order_id);
-    
-    if (!$stmt->execute()) {
-        throw new Exception('Gagal update status: ' . $stmt->error);
-    }
-    
-    $stmt->close();
-    
-    echo json_encode([
-        'success' => true,
-        'message' => 'Status berhasil diupdate'
-    ]);
-    
-} catch (Exception $e) {
-    echo json_encode([
-        'success' => false,
-        'message' => $e->getMessage()
-    ]);
+$input = file_get_contents('php://input');
+$data = json_decode($input, true);
+
+$id = intval($data['id']);
+$status = $conn->real_escape_string($data['status']);
+
+// Validate status
+$valid_statuses = ['pending', 'preparing', 'ready', 'served'];
+if (!in_array($status, $valid_statuses)) {
+    echo json_encode(['success' => false, 'message' => 'Invalid status']);
+    exit();
 }
 
-if (isset($conn)) {
-    $conn->close();
+// Update status
+$sql = "UPDATE kitchen_orders SET status = '$status'";
+
+if ($status == 'preparing') {
+    $sql .= ", started_at = NOW()";
+} elseif ($status == 'ready' || $status == 'served') {
+    $sql .= ", completed_at = NOW()";
+}
+
+$sql .= " WHERE id = $id";
+
+if ($conn->query($sql)) {
+    echo json_encode(['success' => true, 'message' => 'Status updated']);
+} else {
+    echo json_encode(['success' => false, 'message' => $conn->error]);
 }
 ?>
