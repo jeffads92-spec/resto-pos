@@ -1,262 +1,209 @@
 <?php
-// ============================================
-// REPORTS PAGE
-// File: reports.php
-// ============================================
-
-session_start();
 require_once 'config.php';
+session_start();
 
-// Cek login dan role admin
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit;
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'admin') {
+    header('Location: index.php');
+    exit();
 }
 
-if ($_SESSION['role'] !== 'admin') {
-    die('Akses ditolak. Hanya admin yang dapat mengakses laporan.');
-}
+$date_from = $_GET['date_from'] ?? date('Y-m-01');
+$date_to = $_GET['date_to'] ?? date('Y-m-d');
 
-// Get filter parameters
-$report_type = $_GET['type'] ?? 'daily';
-$start_date = $_GET['start_date'] ?? date('Y-m-01');
-$end_date = $_GET['end_date'] ?? date('Y-m-t');
+// Get sales summary - SIMPLE QUERY
+$summary = $conn->query("SELECT 
+    COUNT(*) as total_transactions,
+    COALESCE(SUM(subtotal), 0) as total_subtotal,
+    COALESCE(SUM(discount), 0) as total_discount,
+    COALESCE(SUM(tax), 0) as total_tax,
+    COALESCE(SUM(total), 0) as total_sales
+    FROM transactions 
+    WHERE DATE(created_at) BETWEEN '$date_from' AND '$date_to'
+    AND status = 'completed'")->fetch_assoc();
 
-// Query laporan penjualan
-$sales_query = "
-    SELECT 
-        DATE(transaction_date) as date,
-        COUNT(*) as total_transactions,
-        SUM(total) as total_sales,
-        SUM(subtotal) as subtotal,
-        SUM(tax) as total_tax,
-        SUM(discount) as total_discount
-    FROM transactions
-    WHERE DATE(transaction_date) BETWEEN ? AND ?
-    AND status = 'completed'
-    GROUP BY DATE(transaction_date)
-    ORDER BY date DESC
-";
+// Get expenses
+$total_expenses = $conn->query("SELECT COALESCE(SUM(amount), 0) as total 
+                                 FROM expenses 
+                                 WHERE expense_date BETWEEN '$date_from' AND '$date_to'")->fetch_assoc()['total'];
 
-$stmt = $conn->prepare($sales_query);
-$stmt->bind_param("ss", $start_date, $end_date);
-$stmt->execute();
-$sales_data = $stmt->get_result();
-
-// Query top products
-$top_products_query = "
-    SELECT 
-        p.product_name,
-        SUM(ti.quantity) as total_sold,
-        SUM(ti.subtotal) as total_revenue,
-        AVG(ti.price) as avg_price
-    FROM transaction_items ti
-    JOIN products p ON ti.product_id = p.id
-    JOIN transactions t ON ti.transaction_id = t.id
-    WHERE DATE(t.transaction_date) BETWEEN ? AND ?
-    AND t.status = 'completed'
-    GROUP BY p.id, p.product_name
-    ORDER BY total_sold DESC
-    LIMIT 10
-";
-
-$stmt2 = $conn->prepare($top_products_query);
-$stmt2->bind_param("ss", $start_date, $end_date);
-$stmt2->execute();
-$top_products = $stmt2->get_result();
-
-// Summary totals
-$summary_query = "
-    SELECT 
-        COUNT(*) as total_transactions,
-        SUM(total) as grand_total,
-        AVG(total) as avg_transaction,
-        SUM(discount) as total_discount
-    FROM transactions
-    WHERE DATE(transaction_date) BETWEEN ? AND ?
-    AND status = 'completed'
-";
-
-$stmt3 = $conn->prepare($summary_query);
-$stmt3->bind_param("ss", $start_date, $end_date);
-$stmt3->execute();
-$summary = $stmt3->get_result()->fetch_assoc();
+$net_profit = $summary['total_sales'] - $total_expenses;
 
 include 'header.php';
 ?>
 
-<div class="container-fluid py-4">
-    <div class="row mb-4">
-        <div class="col-md-6">
-            <h2><i class="fas fa-file-alt"></i> Laporan Keuangan</h2>
-        </div>
-        <div class="col-md-6 text-end">
-            <button class="btn btn-success" onclick="window.print()">
-                <i class="fas fa-print"></i> Print Laporan
-            </button>
-            <button class="btn btn-primary" onclick="exportToExcel()">
-                <i class="fas fa-file-excel"></i> Export Excel
-            </button>
-        </div>
+<style>
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+}
+
+.container-main {
+    padding: 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.page-header {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.page-title {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 0 1rem 0;
+}
+
+.filter-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.filter-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto auto;
+    gap: 1rem;
+    align-items: end;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 1rem;
+}
+
+.btn {
+    padding: 0.75rem 2rem;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-success {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.stat-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    margin-bottom: 1rem;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 0.25rem;
+}
+
+.stat-label {
+    color: #718096;
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+@media (max-width: 768px) {
+    .filter-form {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<div class="container-main">
+    <div class="page-header">
+        <h1 class="page-title">📊 Laporan Keuangan</h1>
+        <p style="color: #718096; margin: 0;">Ringkasan penjualan dan keuangan</p>
     </div>
 
-    <!-- Filter -->
-    <div class="card mb-4">
-        <div class="card-body">
-            <form method="GET" class="row g-3">
-                <div class="col-md-3">
-                    <label class="form-label">Tipe Laporan</label>
-                    <select name="type" class="form-select">
-                        <option value="daily" <?= $report_type === 'daily' ? 'selected' : '' ?>>Harian</option>
-                        <option value="monthly" <?= $report_type === 'monthly' ? 'selected' : '' ?>>Bulanan</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Tanggal Mulai</label>
-                    <input type="date" name="start_date" class="form-control" 
-                           value="<?= htmlspecialchars($start_date) ?>">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Tanggal Akhir</label>
-                    <input type="date" name="end_date" class="form-control" 
-                           value="<?= htmlspecialchars($end_date) ?>">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">&nbsp;</label>
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="fas fa-search"></i> Tampilkan
-                    </button>
-                </div>
-            </form>
-        </div>
+    <div class="filter-card">
+        <form class="filter-form" method="GET">
+            <div class="form-group">
+                <label>Dari Tanggal</label>
+                <input type="date" name="date_from" value="<?= $date_from ?>" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Sampai Tanggal</label>
+                <input type="date" name="date_to" value="<?= $date_to ?>" class="form-control">
+            </div>
+            <button type="submit" class="btn btn-primary">🔍 Filter</button>
+            <a href="export_excel.php?type=sales&date_from=<?= $date_from ?>&date_to=<?= $date_to ?>" class="btn btn-success">
+                📥 Export Excel
+            </a>
+        </form>
     </div>
 
-    <!-- Summary Cards -->
-    <div class="row mb-4">
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted">Total Transaksi</h6>
-                    <h3><?= number_format($summary['total_transactions'] ?? 0) ?></h3>
-                </div>
-            </div>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white;">💰</div>
+            <div class="stat-value">Rp <?= number_format($summary['total_sales'], 0, ',', '.') ?></div>
+            <div class="stat-label">Total Penjualan</div>
         </div>
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted">Total Penjualan</h6>
-                    <h3 class="text-success">Rp <?= number_format($summary['grand_total'] ?? 0, 0, ',', '.') ?></h3>
-                </div>
-            </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); color: white;">💸</div>
+            <div class="stat-value">Rp <?= number_format($total_expenses, 0, ',', '.') ?></div>
+            <div class="stat-label">Total Pengeluaran</div>
         </div>
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted">Rata-rata Transaksi</h6>
-                    <h3>Rp <?= number_format($summary['avg_transaction'] ?? 0, 0, ',', '.') ?></h3>
-                </div>
-            </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">📈</div>
+            <div class="stat-value">Rp <?= number_format($net_profit, 0, ',', '.') ?></div>
+            <div class="stat-label">Laba Bersih</div>
         </div>
-        <div class="col-md-3">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted">Total Diskon</h6>
-                    <h3 class="text-danger">Rp <?= number_format($summary['total_discount'] ?? 0, 0, ',', '.') ?></h3>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row">
-        <!-- Sales Report Table -->
-        <div class="col-md-7 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">Laporan Penjualan Harian</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover" id="salesTable">
-                            <thead>
-                                <tr>
-                                    <th>Tanggal</th>
-                                    <th>Transaksi</th>
-                                    <th>Subtotal</th>
-                                    <th>Pajak</th>
-                                    <th>Diskon</th>
-                                    <th>Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php 
-                                $grand_total = 0;
-                                while ($row = $sales_data->fetch_assoc()): 
-                                    $grand_total += $row['total_sales'];
-                                ?>
-                                    <tr>
-                                        <td><?= date('d/m/Y', strtotime($row['date'])) ?></td>
-                                        <td><?= $row['total_transactions'] ?></td>
-                                        <td>Rp <?= number_format($row['subtotal'], 0, ',', '.') ?></td>
-                                        <td>Rp <?= number_format($row['total_tax'], 0, ',', '.') ?></td>
-                                        <td>Rp <?= number_format($row['total_discount'], 0, ',', '.') ?></td>
-                                        <td><strong>Rp <?= number_format($row['total_sales'], 0, ',', '.') ?></strong></td>
-                                    </tr>
-                                <?php endwhile; ?>
-                            </tbody>
-                            <tfoot>
-                                <tr class="table-dark">
-                                    <td colspan="5" class="text-end"><strong>GRAND TOTAL:</strong></td>
-                                    <td><strong>Rp <?= number_format($grand_total, 0, ',', '.') ?></strong></td>
-                                </tr>
-                            </tfoot>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Top Products -->
-        <div class="col-md-5 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">Top 10 Produk Terlaris</h5>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Produk</th>
-                                    <th>Terjual</th>
-                                    <th>Revenue</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php 
-                                $rank = 1;
-                                while ($product = $top_products->fetch_assoc()): 
-                                ?>
-                                    <tr>
-                                        <td><?= $rank++ ?></td>
-                                        <td><?= htmlspecialchars($product['product_name']) ?></td>
-                                        <td><span class="badge bg-primary"><?= $product['total_sold'] ?></span></td>
-                                        <td class="text-success">Rp <?= number_format($product['total_revenue'], 0, ',', '.') ?></td>
-                                    </tr>
-                                <?php endwhile; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">📝</div>
+            <div class="stat-value"><?= $summary['total_transactions'] ?></div>
+            <div class="stat-label">Total Transaksi</div>
         </div>
     </div>
 </div>
-
-<script>
-function exportToExcel() {
-    window.location.href = 'api/export_excel.php?start_date=<?= $start_date ?>&end_date=<?= $end_date ?>';
-}
-</script>
 
 <?php include 'footer.php'; ?>
